@@ -1,12 +1,5 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -15,15 +8,193 @@ datasource db {
 
 model User {
   id           String   @id @default(uuid())
-  email       String   @unique
-  name        String?
+  email        String   @unique
+  name         String?
   passwordHash String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  apiKeys     ApiKey[]
+  apiKeys       ApiKey[]
+  patients      Patient[]
+  predictions   Prediction[]
+  xrayAnalyses XRayAnalysis[]
 
   @@map("users")
-
 }
 
+model ApiKey {
+  id         String    @id @default(uuid())
+  keyId      String    @unique
+  keyPrefix  String    @unique
+  keyHash    String    @unique
+  name       String
+  userId     String
+  scopes     String[]  @default(["read"])
+  expiresAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  isActive   Boolean   @default(true)
+
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([keyPrefix])
+  @@map("api_keys")
+}
+
+model Patient {
+  id              String   @id @default(uuid())
+  userId          String
+  externalId      String?  @unique
+  name            String?
+  dateOfBirth     DateTime?
+  gender          String?
+  
+  familyHistory   Boolean  @default(false)
+  geneticMarkers  String[] @default([])
+  lifestyle       Json?
+  reproductive    Json?
+  previousConditions Json?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  predictions     Prediction[]
+  xrayAnalyses    XRayAnalysis[]
+
+  @@index([userId])
+  @@index([externalId])
+  @@map("patients")
+}
+
+model Prediction {
+  id              String   @id @default(uuid())
+  patientId       String?
+  userId          String
+  
+  features        Json
+    
+  modelPrediction Json?    // Individual model predictions
+  ensembleResult  Json?    // Combined ensemble result
+  
+  legacyResult    Json?
+  
+  prediction      String   // "benign" | "malignant"
+  confidence      Float
+  riskScore       Float
+  riskLevel       String   // "low" | "medium" | "high" | "very_high"
+  
+  fiveYearRisk    Float?
+  tenYearRisk     Float?
+  lifetimeRisk   Float?
+  riskFactors     Json?
+  recommendations String[]
+  
+  modelVersion    String   @default("v1")
+  modelsUsed      String[] // ["logistic_regression", "random_forest", "svm"]
+  
+  createdAt       DateTime @default(now())
+
+  patient         Patient? @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([userId])
+  @@index([prediction])
+  @@index([createdAt])
+  @@map("predictions")
+}
+
+model XRayAnalysis {
+  id              String   @id @default(uuid())
+  patientId       String?
+  userId          String
+  
+  imageUrl        String?
+  imageBase64     String?
+  
+  analysisResult  Json
+  
+  hasAbnormality  Boolean
+  riskLevel       String   // "low" | "medium" | "high"
+  confidence      Float
+  findings       String[]
+  cancerType      String?
+  
+  previousAnalysisId String? @unique
+  
+  longitudinalResult Json?
+  trend            String?  // "improving" | "stable" | "concerning"
+  changes          String[]
+  
+  analysisDate    DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  patient         Patient?  @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  previousAnalysis XRayAnalysis? @relation("XRayHistory", fields: [previousAnalysisId], references: [id])
+  nextAnalysis    XRayAnalysis? @relation("XRayHistory")
+
+  @@index([patientId])
+  @@index([userId])
+  @@index([analysisDate])
+  @@map("xray_analyses")
+}
+
+model TrainedModel {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  version         String
+  
+  // Model type: "logistic_regression" | "random_forest" | "svm" | "ensemble"
+  modelType       String
+  
+  parameters      Json
+  
+  accuracy        Float?
+  precision       Float?
+  recall          Float?
+  f1Score         Float?
+  auc             Float?
+  
+  trainingSize    Int?
+  trainingDate    DateTime @default(now())
+  
+  // Feature configuration
+  features        String[] @default([])
+  
+  isActive        Boolean  @default(true)
+  
+  @@index([modelType])
+  @@index([isActive])
+  @@map("trained_models")
+}
+
+model AuditLog {
+  id              String   @id @default(uuid())
+  userId          String?
+  apiKeyId        String?
+  
+  endpoint        String
+  method          String
+  ipAddress       String?
+  userAgent       String?
+  
+  statusCode      Int
+  responseTime    Int?    // milliseconds
+  
+  requestBody     Json?
+  responseBody    Json?
+  
+  // Error info
+  errorMessage    String?
+  
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([apiKeyId])
+  @@index([endpoint])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
