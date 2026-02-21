@@ -8,7 +8,7 @@ import json
 from flask import Flask, request, jsonify
 import torch
 import torchxrayvision as xrv
-import torchvision.transforms as transforms
+import torchvision.transforms as T
 from PIL import Image
 import warnings
 warnings.filterwarnings('ignore')
@@ -62,10 +62,10 @@ def process_image(image_data, target_size=224):
         # Resize
         img = img.resize((target_size, target_size), Image.LANCZOS)
         
-        # Convert to tensor and normalize
-        transform = transforms.Compose([
-            xrv.transforms.ToLowerResize(224),
-            xrv.transforms.Normalize(),
+        # Convert to tensor - keep grayscale (1 channel) for xrv model
+        transform = T.Compose([
+            T.ToTensor(),
+            T.Normalize(mean=[0.5], std=[0.5]),  # Simple normalization for grayscale
         ])
         
         img_tensor = transform(img)
