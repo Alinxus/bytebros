@@ -5,6 +5,8 @@ import { prisma } from "./db/prisma.js";
 import { analyzeXRay } from "./xray-analysis.js";
 import { predictCancer, predictFromXRay, type PatientFeatures, type RiskFactors, type LongitudinalData } from "./prediction-engine.js";
 import { calculateCancerRisk, type PatientRiskFactors, type XRayAnalysisResult, type LongitudinalScan } from "./cancer-risk-models.js";
+import { predictBreastCancer, checkBreastCancerServiceHealth, BREAST_CANCER_FEATURES } from "./breast-cancer-client.js";
+import { analyzeMammography, checkMammographyServiceHealth } from "./mammography-client.js";
 
 const cancer = new Hono();
 
@@ -458,5 +460,583 @@ cancer.post(
     });
   }
 );
+
+cancer.post(
+  "/breast-cancer-predict",
+  zValidator("json", z.object({
+    features: z.array(z.number()),
+    patientData: z.object({
+      age: z.number().optional(),
+      familyHistory: z.boolean().optional(),
+      geneticMarkers: z.array(z.string()).optional(),
+    }).optional(),
+  })),
+  async (c) => {
+    const body = c.req.valid("json");
+    const userId = c.get("userId");
+
+    const mlHealthy = await checkBreastCancerServiceHealth();
+    if (!mlHealthy) {
+      return c.json({ error: "Breast cancer service unavailable. Make sure ML service runs on port 5001." }, 503);
+    }
+
+    try {
+      const result = await predictBreastCancer(body.features);
+
+      try {
+        await prisma.prediction.create({
+          data: {
+            userId,
+            type: "breast_cancer",
+            input: JSON.stringify({ features: body.features, patientData: body.patientData }),
+            result: result.prediction,
+            confidence: result.confidence,
+            riskLevel: result.riskLevel,
+          },
+        });
+      } catch (e) {
+        console.log("[DB] Warning: Failed to save", e);
+      }
+
+      return c.json({
+        timestamp: new Date().toISOString(),
+        prediction: result,
+        disclaimer: "This is a screening assist tool, not a medical diagnosis.",
+      });
+    } catch (err) {
+      return c.json({ error: "Prediction failed" }, 500);
+    }
+  }
+);
+
+cancer.post(
+  "/mammography",
+  zValidator("json", z.object({
+    imageBase64: z.string().optional(),
+    imageUrl: z.string().url().optional(),
+    patientData: z.object({
+      age: z.number().optional(),
+      familyHistory: z.boolean().optional(),
+      previousScreenings: z.array(z.object({
+        date: z.string(),
+        result: z.enum(["normal", "abnormal"]).optional(),
+      })).optional(),
+    }).optional(),
+  })),
+  async (c) => {
+    const body = c.req.valid("json");
+    const userId = c.get("userId");
+
+    const mlHealthy = await checkMammographyServiceHealth();
+    if (!mlHealthy) {
+      return c.json({ error: "Mammography service unavailable. Make sure ML service runs on port 5002." }, 503);
+    }
+
+    if (!body.imageBase64 && !body.imageUrl) {
+      return c.json({ error: "imageBase64 or imageUrl required" }, 400);
+    }
+
+    try {
+      const result = await analyzeMammography(body.imageBase64 || body.imageUrl!);
+
+      try {
+        await prisma.xrayAnalysis.create({
+          data: {
+            userId,
+            imageType: "mammography",
+            hasAbnormality: result.prediction === "malignant",
+            riskLevel: result.riskLevel,
+            confidence: result.confidence,
+            findings: JSON.stringify(result),
+          },
+        });
+      } catch (e) {
+        console.log("[DB] Warning: Failed to save", e);
+      }
+
+      return c.json({
+        timestamp: new Date().toISOString(),
+        analysis: result,
+        patientData: body.patientData,
+        disclaimer: "This is a screening assist tool, not a medical diagnosis. Consult a radiologist.",
+      });
+    } catch (err) {
+      return c.json({ error: "Analysis failed" }, 500);
+    }
+  }
+);
+
+cancer.post(
+  "/analyze",
+  zValidator("json", z.object({
+    imageBase64: z.string().optional(),
+    imageUrl: z.string().url().optional(),
+    scanType: z.enum(["chest", "breast", "mammography"]).optional(),
+    patientData: z.object({
+      age: z.number().min(1).max(120).optional(),
+      gender: z.enum(["male", "female"]).optional(),
+      familyHistory: z.boolean().optional(),
+      symptoms: z.array(z.string()).optional(),
+    }).optional(),
+  })),
+  async (c) => {
+    const body = c.req.valid("json");
+    const userId = c.get("userId");
+
+    const imageData = body.imageBase64 || body.imageUrl;
+    if (!imageData) {
+      return c.json({ error: "imageBase64 or imageUrl required" }, 400);
+    }
+
+    const results: any = {
+      timestamp: new Date().toISOString(),
+      scanType: body.scanType || "chest",
+      status: "completed",
+      summary: {},
+      details: {},
+      recommendations: [],
+      nextSteps: [],
+    };
+
+    try {
+      if (body.scanType === "breast" || body.scanType === "mammography") {
+        const mlHealthy = await checkMammographyServiceHealth();
+        if (mlHealthy) {
+          const analysis = await analyzeMammography(imageData);
+          
+          results.summary = {
+            result: analysis.prediction === "malignant" ? "Abnormal" : "Normal",
+            riskLevel: analysis.riskLevel,
+            confidence: Math.round(analysis.confidence * 100) + "%",
+            severity: analysis.prediction === "malignant" ? "high" : "low",
+          };
+
+          results.details = {
+            prediction: analysis.prediction,
+            probability: {
+              benign: Math.round(analysis.probabilities.benign * 100) + "%",
+              malignant: Math.round(analysis.probabilities.malignant * 100) + "%",
+            },
+            analysisMethod: analysis.analysisMethod,
+          };
+
+          results.recommendations = analysis.prediction === "malignant" 
+            ? ["Schedule follow-up with specialist", "Consider biopsy", "Regular monitoring recommended"]
+            : ["Continue routine screening", "Annual mammogram recommended"];
+
+          results.nextSteps = analysis.prediction === "malignant"
+            ? ["Contact your healthcare provider within 1 week", "Bring this report to your doctor"]
+            : ["Continue self-examination", "Schedule next screening in 1 year"];
+        }
+      } else {
+        const mlHealthy = await fetch("http://localhost:5000/health").then(r => r.ok).catch(() => false);
+        
+        if (mlHealthy) {
+          const analysis = await analyzeXRay(imageData);
+          
+          const findingsList = analysis.findings?.map((f: any) => ({
+            condition: f.type,
+            probability: f.description,
+            severity: f.severity,
+          })) || [];
+
+          results.summary = {
+            result: analysis.hasAbnormality ? "Abnormal" : "Normal",
+            riskLevel: analysis.riskLevel,
+            confidence: Math.round((analysis.confidence || 0.5) * 100) + "%",
+            severity: analysis.riskLevel === "high" ? "high" : analysis.riskLevel === "medium" ? "medium" : "low",
+          };
+
+          results.details = {
+            findings: findingsList,
+            modelUsed: analysis.model || "densenet121",
+            conditionsDetected: findingsList.length,
+          };
+
+          results.recommendations = analysis.riskLevel === "high"
+            ? ["Urgent: Schedule appointment immediately", "Consider chest CT scan", "Consult pulmonologist"]
+            : analysis.riskLevel === "medium"
+            ? ["Follow-up within 2-4 weeks", "Monitor symptoms", "Consider additional testing"]
+            : ["Continue routine screening", "No immediate action needed"];
+
+          results.nextSteps = analysis.riskLevel === "high"
+            ? ["Visit emergency or schedule ASAP", "Show this report to doctor"]
+            : ["Schedule routine checkup", "Monitor any symptoms"];
+        }
+      }
+
+      if (body.patientData) {
+        const riskFactors: string[] = [];
+        if (body.patientData.age && body.patientData.age > 50) riskFactors.push("Age > 50");
+        if (body.patientData.familyHistory) riskFactors.push("Family history of cancer");
+        
+        if (riskFactors.length > 0) {
+          results.riskFactors = riskFactors;
+        }
+      }
+
+      results.disclaimer = "This is an AI-assisted screening, not a medical diagnosis. Always consult healthcare professionals.";
+      results.urgentWarning = results.summary.riskLevel === "high" 
+        ? "HIGH RISK DETECTED - Please consult a healthcare professional immediately" 
+        : null;
+
+      return c.json(results);
+
+    } catch (err) {
+      return c.json({ 
+        error: "Analysis failed",
+        message: "Unable to process the image. Please try again or consult a healthcare professional.",
+        status: "failed" 
+      }, 500);
+    }
+  }
+);
+
+cancer.post(
+  "/longitudinal-track",
+  zValidator("json", z.object({
+    currentImageBase64: z.string().optional(),
+    currentImageUrl: z.string().url().optional(),
+    previousScans: z.array(z.object({
+      date: z.string(),
+      result: z.string(),
+      riskLevel: z.enum(["low", "medium", "high"]),
+      confidence: z.number().optional(),
+    })),
+  })),
+  async (c) => {
+    const body = c.req.valid("json");
+
+    let currentAnalysis = null;
+    if (body.currentImageBase64 || body.currentImageUrl) {
+      const mlHealthy = await checkMammographyServiceHealth();
+      if (mlHealthy) {
+        currentAnalysis = await analyzeMammography(body.currentImageBase64 || body.currentImageUrl!);
+      }
+    }
+
+    const scans = [...body.previousScans];
+    if (currentAnalysis) {
+      scans.push({
+        date: new Date().toISOString(),
+        result: currentAnalysis.prediction,
+        riskLevel: currentAnalysis.riskLevel,
+        confidence: currentAnalysis.confidence,
+      });
+    }
+
+    let trend = "stable";
+    const changes: string[] = [];
+    
+    if (scans.length >= 2) {
+      const recent = scans[scans.length - 1];
+      const previous = scans[scans.length - 2];
+      
+      if (previous.riskLevel === "low" && recent.riskLevel === "medium") {
+        trend = "concerning";
+        changes.push("Risk level increased from low to medium");
+      } else if (previous.riskLevel === "low" && recent.riskLevel === "high") {
+        trend = "concerning";
+        changes.push("Risk level increased from low to high - urgent follow-up recommended");
+      } else if (previous.riskLevel === "medium" && recent.riskLevel === "high") {
+        trend = "concerning";
+        changes.push("Risk level increased from medium to high - urgent follow-up recommended");
+      } else if (previous.riskLevel === "high" && recent.riskLevel === "low") {
+        trend = "improving";
+        changes.push("Risk level decreased significantly");
+      } else if (recent.confidence && previous.confidence) {
+        if (recent.confidence > previous.confidence + 0.2) {
+          trend = "concerning";
+          changes.push("Prediction confidence increased significantly");
+        } else if (recent.confidence < previous.confidence - 0.2) {
+          trend = "improving";
+          changes.push("Prediction confidence decreased");
+        }
+      }
+    }
+
+    return c.json({
+      timestamp: new Date().toISOString(),
+      currentAnalysis,
+      previousScans: body.previousScans,
+      longitudinalAnalysis: {
+        trend,
+        changes,
+        totalScans: scans.length,
+        recommendation: trend === "concerning" 
+          ? "Changes detected - schedule follow-up with healthcare provider"
+          : trend === "improving"
+          ? "Positive trend - continue regular screenings"
+          : "No significant changes - continue routine screening"
+      },
+      disclaimer: "This is a screening assist tool, not a medical diagnosis.",
+    });
+  }
+);
+
+cancer.post(
+  "/risk-assessment",
+  zValidator("json", z.object({
+    patientData: z.object({
+      age: z.number().min(18).max(100),
+      gender: z.enum(["male", "female"]),
+      familyHistory: z.boolean().optional(),
+      geneticMarkers: z.array(z.string()).optional(),
+      lifestyle: z.object({
+        smoking: z.enum(["current", "former", "never"]).optional(),
+        alcohol: z.enum(["heavy", "moderate", "none"]).optional(),
+        obesity: z.enum(["obese", "overweight", "normal"]).optional(),
+      }).optional(),
+      previousConditions: z.object({
+        atypicalHyperplasia: z.boolean().optional(),
+        LCIS: z.boolean().optional(),
+        previousCancer: z.boolean().optional(),
+      }).optional(),
+    }),
+    imagingResult: z.object({
+      hasAbnormality: z.boolean(),
+      riskLevel: z.enum(["low", "medium", "high"]).optional(),
+      confidence: z.number().optional(),
+    }).optional(),
+  })),
+  async (c) => {
+    const body = c.req.valid("json");
+    const { patientData, imagingResult } = body;
+
+    let overallRisk = 0;
+    const riskFactors: string[] = [];
+
+    if (patientData.age > 65) {
+      overallRisk += 20;
+      riskFactors.push("Age > 65 (+20)");
+    } else if (patientData.age > 50) {
+      overallRisk += 10;
+      riskFactors.push("Age 50-65 (+10)");
+    }
+
+    if (patientData.familyHistory) {
+      overallRisk += 25;
+      riskFactors.push("Family history (+25)");
+    }
+
+    if (patientData.geneticMarkers) {
+      for (const marker of patientData.geneticMarkers) {
+        const m = marker.toUpperCase();
+        if (m.includes("BRCA")) {
+          overallRisk += 40;
+          riskFactors.push(`${marker} (+40)`);
+        }
+      }
+    }
+
+    if (patientData.lifestyle?.smoking === "current") {
+      overallRisk += 20;
+      riskFactors.push("Current smoker (+20)");
+    }
+
+    if (patientData.lifestyle?.obesity === "obese") {
+      overallRisk += 15;
+      riskFactors.push("Obesity (+15)");
+    }
+
+    if (patientData.previousConditions?.previousCancer) {
+      overallRisk += 30;
+      riskFactors.push("Previous cancer (+30)");
+    }
+
+    if (imagingResult?.hasAbnormality) {
+      overallRisk += 30;
+      riskFactors.push("Imaging abnormality (+30)");
+    }
+
+    const riskLevel = overallRisk >= 60 ? "high" : overallRisk >= 30 ? "medium" : "low";
+
+    return c.json({
+      timestamp: new Date().toISOString(),
+      riskAssessment: {
+        overallRisk: Math.min(overallRisk, 100),
+        riskLevel,
+        factors: riskFactors,
+        recommendations: riskLevel === "high" 
+          ? ["Schedule immediate follow-up", "Consider biopsy", "Genetic counseling recommended"]
+          : riskLevel === "medium"
+          ? ["Schedule follow-up within 3 months", "Consider additional imaging"]
+          : ["Continue routine screening", "Annual checkup recommended"]
+      },
+      disclaimer: "This is a risk assessment tool, not a medical diagnosis.",
+    });
+  }
+);
+
+cancer.post(
+  "/triage",
+  zValidator("json", z.object({
+    symptoms: z.array(z.string()).optional(),
+    patientData: z.object({
+      age: z.number().min(18),
+      gender: z.enum(["male", "female"]),
+      riskFactors: z.array(z.string()).optional(),
+    }).optional(),
+  })),
+  async (c) => {
+    const body = c.req.valid("json");
+    const { symptoms, patientData } = body;
+
+    let urgency = "routine";
+    const reasons: string[] = [];
+
+    const urgentSymptoms = ["chest pain", "coughing blood", "severe weight loss", "difficulty breathing"];
+    if (symptoms) {
+      for (const s of symptoms) {
+        if (urgentSymptoms.some(us => s.toLowerCase().includes(us))) {
+          urgency = "urgent";
+          reasons.push(`Symptom: ${s} requires urgent attention`);
+        }
+      }
+    }
+
+    if (patientData?.age && patientData.age > 60) {
+      if (urgency !== "urgent") {
+        urgency = "soon";
+      }
+      reasons.push("Age > 60 - increased vigilance recommended");
+    }
+
+    const recommendations = {
+      urgent: [
+        "Seek immediate medical attention",
+        "Visit emergency department",
+        "Do not delay treatment"
+      ],
+      soon: [
+        "Schedule appointment within 1-2 weeks",
+        "Consider imaging screening",
+        "Consult with primary physician"
+      ],
+      routine: [
+        "Schedule routine screening",
+        "Annual checkup recommended",
+        "Maintain healthy lifestyle"
+      ]
+    };
+
+    return c.json({
+      timestamp: new Date().toISOString(),
+      triage: {
+        urgency,
+        reasons,
+        recommendations: recommendations[urgency],
+        nextSteps: urgency === "urgent" 
+          ? "Go to nearest hospital or call emergency services"
+          : "Contact your healthcare provider to schedule an appointment"
+      },
+      disclaimer: "This is a triage tool, not a medical diagnosis. Always consult healthcare professionals.",
+    });
+  }
+);
+
+cancer.post(
+  "/second-opinion",
+  zValidator("json", z.object({
+    physicianFindings: z.string(),
+    imageBase64: z.string().optional(),
+    imageUrl: z.string().url().optional(),
+    patientData: z.object({
+      age: z.number().optional(),
+      gender: z.enum(["male", "female"]).optional(),
+    }).optional(),
+  })),
+  async (c) => {
+    const body = c.req.valid("json");
+
+    let aiAnalysis = null;
+    if (body.imageBase64 || body.imageUrl) {
+      const mlHealthy = await checkMammographyServiceHealth();
+      if (mlHealthy) {
+        aiAnalysis = await analyzeMammography(body.imageBase64 || body.imageUrl!);
+      }
+    }
+
+    const concerns: string[] = [];
+    const agreements: string[] = [];
+
+    if (aiAnalysis) {
+      if (body.physicianFindings.toLowerCase().includes("normal") && aiAnalysis.prediction === "malignant") {
+        concerns.push("AI detected abnormality that physician did not note");
+      } else if (body.physicianFindings.toLowerCase().includes("abnormal") && aiAnalysis.prediction === "benign") {
+        concerns.push("AI did not detect abnormality noted by physician");
+      } else {
+        agreements.push("AI and physician findings are consistent");
+      }
+
+      if (aiAnalysis.confidence > 0.8) {
+        concerns.push("High AI confidence - consider follow-up");
+      }
+    }
+
+    return c.json({
+      timestamp: new Date().toISOString(),
+      secondOpinion: {
+        physicianFindings: body.physicianFindings,
+        aiAnalysis,
+        concerns,
+        agreements,
+        summary: concerns.length > 0 
+          ? "Potential discrepancies found - follow-up recommended"
+          : "Findings are consistent - continue as recommended",
+        recommendation: concerns.length > 0 
+          ? "Discuss AI findings with your physician"
+          : "No action required - continue routine care"
+      },
+      disclaimer: "This is a second opinion tool, not a medical diagnosis.",
+    });
+  }
+);
+
+cancer.get("/history", async (c) => {
+  const userId = c.get("userId");
+
+  let predictions: any[] = [];
+  let analyses: any[] = [];
+
+  try {
+    predictions = await prisma.prediction.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+  } catch (e) {
+    console.log("[DB] No predictions");
+  }
+
+  try {
+    analyses = await prisma.xRayAnalysis.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+  } catch (e) {
+    console.log("[DB] No xray analyses");
+  }
+
+  return c.json({
+    timestamp: new Date().toISOString(),
+    history: {
+      predictions: predictions.map(p => ({
+        id: p.id,
+        type: p.prediction,
+        result: p.prediction,
+        date: p.createdAt,
+      })),
+      xrayAnalyses: analyses.map(a => ({
+        id: a.id,
+        imageType: a.imageType,
+        hasAbnormality: a.hasAbnormality,
+        riskLevel: a.riskLevel,
+        date: a.createdAt,
+      })),
+    },
+  });
+});
 
 export default cancer;
