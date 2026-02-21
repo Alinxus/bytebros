@@ -1,5 +1,10 @@
-app = 'cavista-black-glitter-815'
-primary_region = 'lhr'
+# fly.toml app configuration file generated for bytebros on 2026-02-21T21:38:41Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'bytebros'
+primary_region = 'iad'
 
 [build]
 
@@ -12,6 +17,7 @@ primary_region = 'lhr'
   processes = ['app']
 
 [[vm]]
-  memory = '2gb'
-  cpus = 2
-  memory_mb = 2048
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
