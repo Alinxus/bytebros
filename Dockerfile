@@ -13,6 +13,8 @@ COPY package*.json ./
 RUN npm install
 COPY . .
 RUN npx prisma generate
+# Explicitly ensure ml-model is copied
+RUN ls -la ml-model/
 
 # Stage 3: Runner
 FROM python:3.11-slim

@@ -1,4 +1,4 @@
-app = 'cavista-black-glitter-815'
+app = 'bytebros'
 primary_region = 'lhr'
 
 [build]
@@ -6,12 +6,11 @@ primary_region = 'lhr'
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = 'stop'
-  auto_start_machines = true
-  min_machines_running = 0
+  auto_stop_machines = 'off'
+  min_machines_running = 1
   processes = ['app']
 
 [[vm]]
-  memory = '2gb'
+  memory = '4gb'
   cpus = 2
-  memory_mb = 2048
+  memory_mb = 4096
