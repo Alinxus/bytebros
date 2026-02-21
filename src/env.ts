@@ -3,6 +3,6 @@ export const env = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
   EMBEDDING_MODE: process.env.EMBEDDING_MODE || "local",
   RERANK_MODE: process.env.RERANK_MODE || "hybrid",
-  PORT: parseInt(process.env.PORT || "3000"),
+  PORT: parseInt(process.env.PORT || "4000"),
   NODE_ENV: process.env.NODE_ENV || "development",
 };
