@@ -18,7 +18,7 @@ app = Flask(__name__)
 # Load models at startup
 print("Loading models...")
 models = {
-    'densenet121': xrv.models.DenseNet(weights='densenet121'),
+    'densenet121': xrv.models.DenseNet(weights='densenet121-res224-all'),
 }
 models['densenet121'].eval()
 
