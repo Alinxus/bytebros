@@ -1,0 +1,246 @@
+"use client";
+
+/*
+|-------------------------------------------------------------
+| Npm Imports
+|-------------------------------------------------------------
+*/
+import { useState } from "react";
+import type { FormEvent, ChangeEvent } from "react";
+
+/*
+|-------------------------------------------------------------
+| Types
+|-------------------------------------------------------------
+*/
+type XrayResult = {
+  analysis: {
+    hasAbnormality: boolean;
+    findings: { type: string; description: string }[];
+    riskLevel: string;
+    confidence: number;
+    model: string;
+  };
+  recommendation: string;
+};
+
+const fileToBase64 = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve((reader.result as string).split(",")[1]);
+    reader.onerror = (error) => reject(error);
+  });
+
+const ChestXrayPage = () => {
+  /*
+  |-------------------------------------------------------------
+  | States
+  |-------------------------------------------------------------
+  */
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string>("");
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [result, setResult] = useState<XrayResult | null>(null);
+/*
+|-------------------------------------------------------------
+| Handlers
+|-------------------------------------------------------------
+| handleFileChange: Validates and sets the selected file, generates a preview, and resets results/errors.
+| handleSubmit: Validates input, converts image to base64, sends analysis request, handles response, and manages loading state. 
+|-------------------------------------------------------------
+*/
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files?.[0];
+    if (!selected) return;
+    setFile(selected);
+    setPreview(URL.createObjectURL(selected));
+    setResult(null);
+    setError("");
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setResult(null);
+
+    if (!file) {
+      setError("Please select an X-ray image.");
+      return;
+    }
+
+    setIsLoading(true);
+    const apiKey = localStorage.getItem("cavista_api_key") || "";
+
+    try {
+      const imageBase64 = await fileToBase64(file);
+
+      const res = await fetch("/api/screening/xray", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+        },
+        body: JSON.stringify({ imageBase64 }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Analysis failed.");
+        return;
+      }
+
+      setResult(data);
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="mb-8">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          Chest X-Ray Analysis
+        </h1>
+        <p className="mt-1 text-sm text-muted">
+          DenseNet121-powered lung analysis. Upload a chest X-ray for AI
+          screening.
+        </p>
+      </div>
+
+      {error && (
+        <div
+          className="mb-6 border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger"
+          role="alert"
+        >
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="border border-border p-6">
+          <p className="text-xs font-medium tracking-widest uppercase text-muted mb-4">
+            Upload X-Ray Image
+          </p>
+          <label
+            htmlFor="xray-file"
+            className="block border-2 border-dashed border-border hover:border-muted transition-colors cursor-pointer text-center py-10"
+          >
+            {preview ? (
+              <img
+                src={preview}
+                alt="X-ray preview"
+                className="mx-auto max-h-48 object-contain"
+              />
+            ) : (
+              <div>
+                <p className="text-sm text-muted mb-1">
+                  Click to upload or drag and drop
+                </p>
+                <p className="text-xs text-muted/60">PNG, JPG, DICOM</p>
+              </div>
+            )}
+            <input
+              id="xray-file"
+              type="file"
+              accept="image/*"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+          </label>
+          {file && (
+            <p className="mt-2 text-xs text-muted">
+              {file.name} ({(file.size / 1024).toFixed(1)} KB)
+            </p>
+          )}
+        </div>
+
+        <button
+          type="submit"
+          disabled={isLoading || !file}
+          className="w-full text-sm font-medium text-white bg-action px-4 py-3 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+          aria-label="Analyze chest X-ray"
+        >
+          {isLoading ? "Analyzing..." : "Analyze X-Ray"}
+        </button>
+      </form>
+
+      {result && (
+        <div className="mt-8 space-y-6">
+          <p className="text-xs font-medium tracking-widest uppercase text-muted">
+            Results
+          </p>
+
+          <div className="border border-border p-6">
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div>
+                <p className="text-xs text-muted mb-1">Abnormality</p>
+                <p
+                  className={`text-sm font-semibold ${result.analysis.hasAbnormality ? "text-danger" : "text-action"}`}
+                >
+                  {result.analysis.hasAbnormality ? "Detected" : "None"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted mb-1">Risk Level</p>
+                <p
+                  className={`text-sm font-semibold capitalize ${
+                    result.analysis.riskLevel === "high"
+                      ? "text-danger"
+                      : result.analysis.riskLevel === "medium"
+                        ? "text-yellow-600"
+                        : "text-action"
+                  }`}
+                >
+                  {result.analysis.riskLevel}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted mb-1">Confidence</p>
+                <p className="text-sm font-semibold text-foreground">
+                  {(result.analysis.confidence * 100).toFixed(1)}%
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-muted mb-1">Model</p>
+            <p className="text-sm text-foreground mb-4">
+              {result.analysis.model}
+            </p>
+
+            {result.analysis.findings.length > 0 && (
+              <div className="mb-4">
+                <p className="text-xs text-muted mb-2">Findings</p>
+                <ul className="space-y-1.5" role="list">
+                  {result.analysis.findings.map((f, i) => (
+                    <li
+                      key={i}
+                      className="text-sm border-l-2 border-border pl-3"
+                    >
+                      <span className="font-medium text-foreground capitalize">
+                        {f.type}
+                      </span>
+                      <p className="text-muted">{f.description}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          <div className="border border-border p-4">
+            <p className="text-sm text-foreground font-medium">
+              {result.recommendation}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ChestXrayPage;

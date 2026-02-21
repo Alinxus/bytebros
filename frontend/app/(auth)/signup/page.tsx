@@ -1,8 +1,12 @@
 "use client";
-
+/*
+|-------------------------------------------------------------
+| Npm Imports
+|-------------------------------------------------------------
+*/
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 
 type SignupFormState = {

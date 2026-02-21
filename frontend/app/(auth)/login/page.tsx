@@ -7,6 +7,7 @@
 */
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 /*
@@ -38,6 +39,7 @@ function LoginPage() {
     });
     const [error, setError] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
 
 /*
 |----------------------------------------------------------
@@ -139,16 +141,27 @@ function LoginPage() {
                     >
                         Password
                     </label>
-                    <input
-                        id="password"
-                        type="password"
-                        value={formData.password}
-                        onChange={(e) => handleChange("password", e.target.value)}
-                        placeholder="Enter your password"
-                        required
-                        className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted/40 focus:outline-none focus:border-foreground transition-colors"
-                        autoComplete="current-password"
-                    />
+                    <div className="relative">
+                        <input
+                            id="password"
+                            type={showPassword ? "text" : "password"}
+                            value={formData.password}
+                            onChange={(e) => handleChange("password", e.target.value)}
+                            placeholder="Enter your password"
+                            required
+                            className="w-full border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted/40 focus:outline-none focus:border-foreground transition-colors pr-10"
+                            autoComplete="current-password"
+                        />
+                        <button
+                            type="button"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted"
+                            onClick={() => setShowPassword((prev) => !prev)}
+                            tabIndex={0}
+                            aria-label={showPassword ? "Hide password" : "Show password"}
+                        >
+                            {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                        </button>
+                    </div>
                 </div>
                 <button
                     type="submit"
