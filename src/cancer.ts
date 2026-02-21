@@ -567,6 +567,132 @@ cancer.post(
 );
 
 cancer.post(
+  "/analyze",
+  zValidator("json", z.object({
+    imageBase64: z.string().optional(),
+    imageUrl: z.string().url().optional(),
+    scanType: z.enum(["chest", "breast", "mammography"]).optional(),
+    patientData: z.object({
+      age: z.number().min(1).max(120).optional(),
+      gender: z.enum(["male", "female"]).optional(),
+      familyHistory: z.boolean().optional(),
+      symptoms: z.array(z.string()).optional(),
+    }).optional(),
+  })),
+  async (c) => {
+    const body = c.req.valid("json");
+    const userId = c.get("userId");
+
+    const imageData = body.imageBase64 || body.imageUrl;
+    if (!imageData) {
+      return c.json({ error: "imageBase64 or imageUrl required" }, 400);
+    }
+
+    const results: any = {
+      timestamp: new Date().toISOString(),
+      scanType: body.scanType || "chest",
+      status: "completed",
+      summary: {},
+      details: {},
+      recommendations: [],
+      nextSteps: [],
+    };
+
+    try {
+      if (body.scanType === "breast" || body.scanType === "mammography") {
+        const mlHealthy = await checkMammographyServiceHealth();
+        if (mlHealthy) {
+          const analysis = await analyzeMammography(imageData);
+          
+          results.summary = {
+            result: analysis.prediction === "malignant" ? "Abnormal" : "Normal",
+            riskLevel: analysis.riskLevel,
+            confidence: Math.round(analysis.confidence * 100) + "%",
+            severity: analysis.prediction === "malignant" ? "high" : "low",
+          };
+
+          results.details = {
+            prediction: analysis.prediction,
+            probability: {
+              benign: Math.round(analysis.probabilities.benign * 100) + "%",
+              malignant: Math.round(analysis.probabilities.malignant * 100) + "%",
+            },
+            analysisMethod: analysis.analysisMethod,
+          };
+
+          results.recommendations = analysis.prediction === "malignant" 
+            ? ["Schedule follow-up with specialist", "Consider biopsy", "Regular monitoring recommended"]
+            : ["Continue routine screening", "Annual mammogram recommended"];
+
+          results.nextSteps = analysis.prediction === "malignant"
+            ? ["Contact your healthcare provider within 1 week", "Bring this report to your doctor"]
+            : ["Continue self-examination", "Schedule next screening in 1 year"];
+        }
+      } else {
+        const mlHealthy = await fetch("http://localhost:5000/health").then(r => r.ok).catch(() => false);
+        
+        if (mlHealthy) {
+          const analysis = await analyzeXRay(imageData);
+          
+          const findingsList = analysis.findings?.map((f: any) => ({
+            condition: f.type,
+            probability: f.description,
+            severity: f.severity,
+          })) || [];
+
+          results.summary = {
+            result: analysis.hasAbnormality ? "Abnormal" : "Normal",
+            riskLevel: analysis.riskLevel,
+            confidence: Math.round((analysis.confidence || 0.5) * 100) + "%",
+            severity: analysis.riskLevel === "high" ? "high" : analysis.riskLevel === "medium" ? "medium" : "low",
+          };
+
+          results.details = {
+            findings: findingsList,
+            modelUsed: analysis.model || "densenet121",
+            conditionsDetected: findingsList.length,
+          };
+
+          results.recommendations = analysis.riskLevel === "high"
+            ? ["Urgent: Schedule appointment immediately", "Consider chest CT scan", "Consult pulmonologist"]
+            : analysis.riskLevel === "medium"
+            ? ["Follow-up within 2-4 weeks", "Monitor symptoms", "Consider additional testing"]
+            : ["Continue routine screening", "No immediate action needed"];
+
+          results.nextSteps = analysis.riskLevel === "high"
+            ? ["Visit emergency or schedule ASAP", "Show this report to doctor"]
+            : ["Schedule routine checkup", "Monitor any symptoms"];
+        }
+      }
+
+      if (body.patientData) {
+        const riskFactors: string[] = [];
+        if (body.patientData.age && body.patientData.age > 50) riskFactors.push("Age > 50");
+        if (body.patientData.familyHistory) riskFactors.push("Family history of cancer");
+        
+        if (riskFactors.length > 0) {
+          results.riskFactors = riskFactors;
+        }
+      }
+
+      results.disclaimer = "This is an AI-assisted screening, not a medical diagnosis. Always consult healthcare professionals.";
+      results.urgentWarning = results.summary.riskLevel === "high" 
+        ? "HIGH RISK DETECTED - Please consult a healthcare professional immediately" 
+        : null;
+
+      return c.json(results);
+
+    } catch (err) {
+      return c.json({ 
+        error: "Analysis failed",
+        message: "Unable to process the image. Please try again or consult a healthcare professional.",
+        status: "failed" 
+      }, 500);
+    }
+  }
+);
+
+cancer.post(
   "/longitudinal-track",
   zValidator("json", z.object({
     currentImageBase64: z.string().optional(),
