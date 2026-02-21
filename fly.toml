@@ -1,10 +1,5 @@
-# fly.toml app configuration file generated for cavista-black-glitter-815 on 2026-02-21T12:11:38-08:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
 app = 'cavista-black-glitter-815'
-primary_region = 'ams'
+primary_region = 'lhr'
 
 [build]
 
@@ -17,6 +12,6 @@ primary_region = 'ams'
   processes = ['app']
 
 [[vm]]
-  memory = '4gb'
+  memory = '2gb'
   cpus = 2
-  memory_mb = 4096
+  memory_mb = 2048
