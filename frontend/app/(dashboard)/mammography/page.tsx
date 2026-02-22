@@ -24,6 +24,23 @@ type MammoResult = {
     };
     probabilities: { benign: number; malignant: number };
     riskLevel: string;
+    birads?: string;
+    birads_score?: number;
+    recommendation?: string;
+    model_info?: {
+      name: string;
+      pretraining?: string;
+      finetuning?: string;
+      accuracy?: string;
+      sensitivity?: string;
+      specificity?: string;
+    };
+    findings?: Array<{
+      type: string;
+      description: string;
+      probability: number;
+      severity: string;
+    }>;
   };
   auditId?: string;
 };
