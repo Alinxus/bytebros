@@ -119,6 +119,17 @@ function LongitudinalPage() {
           findings: p.type,
         });
       });
+      data.history?.reportAnalyses?.forEach((r: any) => {
+        const riskScore = r.riskLevel === "high" ? 75 : r.riskLevel === "medium" ? 45 : 20;
+        scansFromHistory.push({
+          id: r.id,
+          date: new Date(r.date).toISOString().split("T")[0],
+          type: "Report Analysis",
+          result: r.riskLevel || "unknown",
+          riskScore,
+          findings: r.reportType,
+        });
+      });
 
       scansFromHistory.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       setScans(scansFromHistory);

@@ -3,6 +3,8 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import OpenAI from "openai";
 import { env } from "./env.js";
+import { prisma } from "./db/prisma.js";
+import crypto from "crypto";
 
 const openai = env.OPENAI_API_KEY ? new OpenAI({ apiKey: env.OPENAI_API_KEY }) : null;
 
@@ -13,14 +15,25 @@ const reportAnalysisSchema = z.object({
   reportType: z.enum(["blood", "imaging", "biopsy", "general"]).optional(),
 });
 
+const authenticate = async (apiKey?: string | null) => {
+  if (!apiKey) return null;
+  const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
+  const key = await prisma.apiKey.findFirst({
+    where: { keyHash, isActive: true },
+  });
+  return key?.userId || null;
+};
+
 report.post(
   "/analyze",
   zValidator("json", reportAnalysisSchema),
   async (c) => {
     const { reportText, reportType } = c.req.valid("json");
+    const apiKey = c.req.header("x-api-key");
+    const userId = await authenticate(apiKey);
 
     if (!openai) {
-      return c.json({
+      const fallback = {
         success: true,
         analysis: {
           summary: "AI analysis is currently unavailable. Please try again later or consult your healthcare provider.",
@@ -36,7 +49,25 @@ report.post(
           ],
           disclaimer: "Analysis service temporarily unavailable"
         }
-      });
+      };
+
+      if (userId) {
+        try {
+          await prisma.reportAnalysis.create({
+            data: {
+              userId,
+              reportType: reportType || "general",
+              summary: fallback.analysis.summary,
+              riskLevel: fallback.analysis.riskLevel,
+              findings: fallback.analysis.findings,
+              recommendations: fallback.analysis.recommendations,
+              questions: [],
+            },
+          });
+        } catch {}
+      }
+
+      return c.json(fallback);
     }
 
     try {
@@ -116,6 +147,24 @@ Remember: Use simple language, be encouraging, and always recommend professional
           followUp: ["Schedule a follow-up appointment"],
           questionsForDoctor: []
         };
+      }
+
+      if (userId) {
+        try {
+          await prisma.reportAnalysis.create({
+            data: {
+              userId,
+              reportType: reportType || "general",
+              summary: analysis.summary || "",
+              riskLevel: analysis.riskLevel || "unknown",
+              findings: analysis.findings || [],
+              recommendations: analysis.recommendations || [],
+              questions: analysis.questionsForDoctor || [],
+            },
+          });
+        } catch (e) {
+          console.log("[Report Analysis] Failed to save analysis", e);
+        }
       }
 
       return c.json({

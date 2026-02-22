@@ -6,6 +6,7 @@ import os
 from flask import Flask, request, jsonify
 import joblib
 import numpy as np
+import sys
 
 app = Flask(__name__)
 
@@ -25,12 +26,23 @@ FEATURE_NAMES = [
 ]
 
 print("Loading breast cancer model...")
-model = joblib.load(MODEL_PATH)
-scaler = joblib.load(SCALER_PATH)
-print("Model loaded successfully!")
+MODEL_AVAILABLE = True
+model = None
+scaler = None
+try:
+    # Compatibility alias for models saved with numpy 2.x
+    sys.modules.setdefault("numpy._core", np.core)
+    model = joblib.load(MODEL_PATH)
+    scaler = joblib.load(SCALER_PATH)
+    print("Model loaded successfully!")
+except Exception as e:
+    MODEL_AVAILABLE = False
+    print(f"[BREAST SERVICE] Model load failed: {e}")
 
 def predict_breast_cancer(features):
     """Predict breast cancer from 30 features"""
+    if not MODEL_AVAILABLE or model is None or scaler is None:
+        raise RuntimeError("Model unavailable - verify numpy/joblib compatibility and model files.")
     if len(features) != 30:
         raise ValueError(f"Expected 30 features, got {len(features)}")
     
@@ -51,7 +63,7 @@ def predict_breast_cancer(features):
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "healthy", "model": "breast-cancer-rf"})
+    return jsonify({"status": "healthy", "model": "breast-cancer-rf", "modelAvailable": MODEL_AVAILABLE})
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -63,6 +75,8 @@ def predict():
     features = data["features"]
     
     try:
+        if not MODEL_AVAILABLE:
+            return jsonify({"error": "Model unavailable on this instance"}), 503
         result = predict_breast_cancer(features)
         return jsonify(result)
     except Exception as e:

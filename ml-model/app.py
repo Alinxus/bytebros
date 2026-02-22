@@ -7,6 +7,7 @@ import base64
 import json
 import os
 import numpy as np
+import sys
 from flask import Flask, request, jsonify
 import torch
 import torchxrayvision as xrv
@@ -33,6 +34,8 @@ MAMMO_MODEL = None
 MAMMO_SCALER = None
 try:
     if joblib:
+        # Compatibility alias for models saved with numpy 2.x
+        sys.modules.setdefault("numpy._core", np.core)
         mammo_model_path = os.path.join(os.path.dirname(__file__), "breast_cancer_model.joblib")
         mammo_scaler_path = os.path.join(os.path.dirname(__file__), "breast_cancer_scaler.joblib")
         if os.path.exists(mammo_model_path) and os.path.exists(mammo_scaler_path):

@@ -1267,6 +1267,7 @@ cancer.get("/history", async (c) => {
 
   let predictions: any[] = [];
   let analyses: any[] = [];
+  let reports: any[] = [];
 
   try {
     predictions = await prisma.prediction.findMany({
@@ -1288,6 +1289,16 @@ cancer.get("/history", async (c) => {
     console.log("[DB] No xray analyses");
   }
 
+  try {
+    reports = await prisma.reportAnalysis.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+  } catch (e) {
+    console.log("[DB] No report analyses");
+  }
+
   return c.json({
     timestamp: new Date().toISOString(),
     history: {
@@ -1303,6 +1314,13 @@ cancer.get("/history", async (c) => {
         hasAbnormality: a.hasAbnormality,
         riskLevel: a.riskLevel,
         date: a.createdAt,
+      })),
+      reportAnalyses: reports.map(r => ({
+        id: r.id,
+        reportType: r.reportType,
+        summary: r.summary,
+        riskLevel: r.riskLevel,
+        date: r.createdAt,
       })),
     },
   });

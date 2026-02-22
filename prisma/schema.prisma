@@ -18,6 +18,7 @@ model User {
   patients      Patient[]
   predictions   Prediction[]
   xrayAnalyses XRayAnalysis[]
+  reportAnalyses ReportAnalysis[]
 
   @@map("users")
 }
@@ -140,6 +141,24 @@ model XRayAnalysis {
   @@index([userId])
   @@index([analysisDate])
   @@map("xray_analyses")
+}
+
+model ReportAnalysis {
+  id              String   @id @default(uuid())
+  userId          String
+  reportType      String
+  summary         String
+  riskLevel       String
+  findings        Json?
+  recommendations String[]
+  questions       String[]
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("report_analyses")
 }
 
 model TrainedModel {
