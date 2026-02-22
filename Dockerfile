@@ -42,7 +42,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV PYTHONUNBUFFERED=1
 
-EXPOSE 3000 5000 5001 5002
+EXPOSE 3000 5000
 
-# Start all services
-CMD sh -c "cd /app/ml-model && python app.py & cd /app/ml-model && python breast-cancer-service.py & cd /app && npm run dev"
+# Start ML service first, then Node.js
+CMD sh -c "cd /app/ml-model && python app.py > /tmp/ml.log 2>&1 & sleep 5 && cd /app && npm run dev"
