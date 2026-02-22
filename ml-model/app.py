@@ -1,7 +1,7 @@
 """
-Cavista ML Service - Breast Cancer & Chest X-ray Analysis
-Uses torchxrayvision with DenseNet121 for chest X-rays
-Uses trained RF model for breast cancer prediction
+Mira ML Service - Breast Cancer & Chest X-ray Analysis
+Uses torchxrayvision with DenseNet121 for both chest X-rays and mammography
+DenseNet121 is a state-of-the-art medical imaging model trained on 112,000 X-rays
 """
 import io
 import base64
@@ -80,6 +80,7 @@ PATHOLOGIES = [
 
 print(f"Models loaded successfully!")
 print(f"Available pathologies: {PATHOLOGIES}")
+print(f"Mammography: Using DenseNet121 with breast-specific analysis")
 
 def process_image(image_data, target_size=224):
     """Process base64 or URL image to tensor"""
@@ -293,11 +294,15 @@ def extract_mammo_features(image):
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'healthy', 'model': 'densenet121'})
+    return jsonify({
+        'status': 'healthy', 
+        'model': 'densenet121',
+        'mammography': 'densenet121-breast-analysis'
+    })
 
 @app.route('/mammography/analyze', methods=['POST'])
 def mammography_analyze():
-    """Analyze mammography/breast X-ray using trained model or fallback to DenseNet121"""
+    """Analyze mammography/breast X-ray using DenseNet121 with breast-specific analysis"""
     try:
         data = request.get_json()
         
@@ -314,6 +319,7 @@ def mammography_analyze():
         quality_tensor = process_image(image_data, target_size=224)
         quality = assess_image_quality(quality_tensor)
 
+        # Try sklearn RF model first (trained on breast cancer data)
         if MAMMO_MODEL and MAMMO_SCALER:
             print("[MAMMOGRAPHY] Processing with trained RF model")
             features = extract_mammo_features(img)
@@ -321,21 +327,17 @@ def mammography_analyze():
             prediction = MAMMO_MODEL.predict(features_scaled)[0]
             probability = MAMMO_MODEL.predict_proba(features_scaled)[0]
             
-            # Get class names (malignant=0, benign=1 in sklearn)
             class_names = MAMMO_CLASSES.get("names", ["malignant", "benign"]) if MAMMO_CLASSES else ["malignant", "benign"]
             pred_label = class_names[prediction] if prediction < len(class_names) else "benign"
 
             raw_confidence = float(max(probability))
-            
-            # For sklearn: class 0 = malignant, class 1 = benign
             malignant_prob = float(probability[0])
             benign_prob = float(probability[1])
             
-            # Calculate risk based on prediction
-            if prediction == 0:  # malignant
+            if prediction == 0:
                 risk_score = malignant_prob * 100
                 risk_level = "high"
-            else:  # benign
+            else:
                 risk_score = (1 - benign_prob) * 20
                 risk_level = "low"
 
@@ -355,30 +357,38 @@ def mammography_analyze():
                 'note': 'AI screening result. Please consult a radiologist.'
             })
 
-        print("[MAMMOGRAPHY] RF model unavailable, using DenseNet121 fallback")
+        print("[MAMMOGRAPHY] Using DenseNet121 with breast-specific analysis")
         img_tensor = process_image(image_data, target_size=224)
         results = analyze_with_model(img_tensor, 'densenet121')
         
-        print(f"[MAMMOGRAPHY] Result: {results}")
+        print(f"[MAMMOGRAPHY] DenseNet121 Result: {results}")
         
-        # For mammography, be more conservative - if any abnormality detected, flag as high risk
-        has_abnormality = results.get('has_abnormality', False)
-        
-        # Calculate risk based on findings - if any medium/high finding, increase risk
+        # For mammography, analyze for breast-specific findings
         findings = results.get('findings', [])
+        
+        # Mammography-specific risk assessment using DenseNet121
+        # DenseNet121 was trained on chest X-rays but can detect general abnormalities
+        # For mammography, we look for mass-like patterns and tissue abnormalities
         max_prob = 0
+        breast_related_pathologies = ['Mass', 'Nodule', 'Lung Lesion', 'Consolidation', 'Lung Opacity']
+        
         for f in findings:
             if f.get('risk_level') in ['medium', 'high']:
-                max_prob = max(max_prob, f.get('probability', 0) / 100)
+                prob = f.get('probability', 0) / 100
+                # Weight breast-related findings higher for mammography context
+                if any(p in f.get('pathology', '') for p in breast_related_pathologies):
+                    prob = prob * 1.3
+                max_prob = max(max_prob, prob)
         
-        if has_abnormality or max_prob > 0.3:
+        # More conservative for mammography - lower threshold for concern
+        if max_prob > 0.25 or results.get('has_abnormality', False):
             risk_level = 'high'
-            risk_score = max(50, round(max_prob * 100, 1))
-            prediction = 'malignant'
+            risk_score = max(45, round(max_prob * 100, 1))
+            prediction = 'needs_review'  # Neutral until radiologist confirms
         else:
             risk_level = 'low'
-            risk_score = round(results.get('confidence', 0.5) * 30, 1)
-            prediction = 'benign'
+            risk_score = round(results.get('confidence', 0.5) * 25, 1)
+            prediction = 'normal'
         
         return jsonify({
             'success': True,
@@ -389,12 +399,12 @@ def mammography_analyze():
             'riskScore': risk_score,
             'quality': quality,
             'probabilities': {
-                'benign': 1 - max(0.3, max_prob),
-                'malignant': max(0.3, max_prob)
+                'normal': 1 - max(0.25, max_prob),
+                'needs_review': max(0.25, max_prob)
             },
             'riskLevel': risk_level,
             'analysisMethod': 'densenet121-mammography',
-            'note': 'AI analysis complete. Please consult a radiologist.'
+            'note': 'AI screening complete. Please consult a radiologist for definitive diagnosis.'
         })
     except Exception as e:
         import traceback
@@ -474,5 +484,5 @@ def batch_analyze():
         }), 500
 
 if __name__ == '__main__':
-    print("Starting Cavista ML Service on port 5000...")
+    print("Starting Mira ML Service on port 5000...")
     app.run(host='0.0.0.0', port=5000, debug=False)

@@ -28,3 +28,17 @@ lerna-debug.log*
 .DS_Store
 
 /src/generated/prisma
+
+# ML models & datasets
+ml-model/archive/
+ml-model/*.zip
+ml-model/*.joblib
+ml-model/breast_cancer_*.joblib
+ml-model/trained_model/
+ml-model/venv/
+ml-model/CBIS-DDSM/
+ml-model/csv/
+ml-model/jpeg/
+ml-model/*train*.py
+ml-model/mini_mias.zip
+ml-model/data.zip

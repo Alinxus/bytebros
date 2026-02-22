@@ -50,14 +50,17 @@ function ResultsPage() {
           });
           
           scans.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-          setResults(scans);
-          setIsLoading(false);
-          return;
+          if (scans.length > 0) {
+            setResults(scans);
+            setIsLoading(false);
+            return;
+          }
         }
       } catch {
         // History not available
       }
 
+      // Fallback to localStorage
       try {
         const raw = localStorage.getItem("cavista_scan_history");
         if (raw) {

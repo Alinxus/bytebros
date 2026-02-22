@@ -46,8 +46,10 @@ function DashboardPage() {
             });
           });
           setRecentScans(scans.slice(0, 5));
-          setIsLoading(false);
-          return;
+          if (scans.length > 0) {
+            setIsLoading(false);
+            return;
+          }
         }
       } catch (err) {
         // History not available

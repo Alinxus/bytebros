@@ -64,7 +64,7 @@ async function authenticate(c: any) {
 
 cancer.use("*", async (c, next) => {
   const path = c.req.path;
-  if (path === "/xray" || path === "/mammography" || path === "/analyze") {
+  if (path === "/xray" || path === "/mammography" || path === "/analyze" || path === "/history") {
     await next();
     return;
   }
