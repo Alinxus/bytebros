@@ -63,6 +63,11 @@ async function authenticate(c: any) {
 }
 
 cancer.use("*", async (c, next) => {
+  const path = c.req.path;
+  if (path === "/xray" || path === "/mammography" || path === "/analyze") {
+    await next();
+    return;
+  }
   const auth = await authenticate(c);
   if (!auth) {
     return c.json({ error: "Unauthorized - provide x-api-key header" }, 401);
@@ -763,7 +768,8 @@ cancer.post(
   })),
   async (c) => {
     const body = c.req.valid("json");
-    const userId = c.get("userId");
+    const userId = c.get("userId") as string | undefined;
+    const apiKeyId = c.get("apiKeyId") as string | undefined;
 
     if (!body.imageBase64 && !body.imageUrl) {
       return c.json({ error: "imageBase64 or imageUrl required" }, 400);
@@ -812,8 +818,8 @@ cancer.post(
       };
 
       const auditId = await createAuditLog({
-        userId,
-        apiKeyId,
+        userId: userId || undefined,
+        apiKeyId: apiKeyId || undefined,
         endpoint: "/screening/mammography",
         method: "POST",
         statusCode: 200,
