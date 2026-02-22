@@ -162,6 +162,7 @@ def mammography_analyze():
     """Analyze mammography/breast X-ray"""
     try:
         import joblib
+        import numpy as np
         data = request.get_json()
         
         if not data or 'image' not in data:
@@ -169,19 +170,24 @@ def mammography_analyze():
         
         MODEL_PATH = os.path.join(os.path.dirname(__file__), "breast_cancer_model.joblib")
         SCALER_PATH = os.path.join(os.path.dirname(__file__), "breast_cancer_scaler.joblib")
+        
+        print(f"[MAMMOGRAPHY] Loading model from {MODEL_PATH}")
         model = joblib.load(MODEL_PATH)
         scaler = joblib.load(SCALER_PATH)
+        print("[MAMMOGRAPHY] Model loaded successfully")
         
         image_data = data['image']
         if ',' in image_data:
             image_data = image_data.split(',')[1]
         
         img_bytes = base64.b64decode(image_data)
-        img = Image.open(io.BytesIO(img_bytes))
+        img = Image.open(io.BytesIO(img_bytes)).convert('L')
         
-        img = img.convert('L').resize((100, 100))
+        # Resize to 100x100 as expected by the model
+        img = img.resize((100, 100))
         arr = np.array(img)
         
+        # Extract features matching training data format
         features = []
         features.append(np.mean(arr) / 255.0 * 30)
         features.append(np.std(arr) / 255.0 * 30)
@@ -190,21 +196,38 @@ def mammography_analyze():
         
         h, w = arr.shape
         for region in [arr[:h//2, :w//2], arr[:h//2, w//2:], arr[h//2:, :w//2], arr[h//2:, w//2:], arr[h//3:2*h//3, w//3:2*w//3]]:
-            features.extend([np.mean(region)/255.0*30, np.std(region)/255.0*30, np.percentile(region,75)/255.0*30, np.percentile(region,25)/255.0*30])
+            features.extend([
+                np.mean(region) / 255.0 * 30,
+                np.std(region) / 255.0 * 30,
+                np.percentile(region, 75) / 255.0 * 30,
+                np.percentile(region, 25) / 255.0 * 30
+            ])
+        
+        print(f"[MAMMOGRAPHY] Features extracted: {len(features)} features")
         
         features_scaled = scaler.transform([features])
         prediction = model.predict(features_scaled)[0]
         probability = model.predict_proba(features_scaled)[0]
         
-        return jsonify({
+        result = {
             'prediction': 'malignant' if prediction == 1 else 'benign',
             'confidence': float(max(probability)),
-            'probabilities': {'benign': float(probability[0]), 'malignant': float(probability[1])},
+            'probabilities': {
+                'benign': float(probability[0]),
+                'malignant': float(probability[1])
+            },
             'riskLevel': 'high' if prediction == 1 else 'low',
-            'analysisMethod': 'statistical-features',
-            'note': 'This is a preliminary screening. Please consult a radiologist for proper diagnosis.'
-        })
+            'analysisMethod': 'breast-cancer-random-forest',
+            'note': 'Preliminary screening result. Please consult a radiologist.'
+        }
+        
+        print(f"[MAMMOGRAPHY] Result: {result}")
+        
+        return jsonify(result)
     except Exception as e:
+        import traceback
+        print(f"[MAMMOGRAPHY ERROR] {str(e)}")
+        print(traceback.format_exc())
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/analyze', methods=['POST'])
@@ -220,11 +243,16 @@ def analyze():
         if not image_data:
             return jsonify({'error': 'No image provided'}), 400
         
+        print(f"[CHEST X-RAY] Processing image...")
+        
         # Process image
         img_tensor = process_image(image_data)
+        print(f"[CHEST X-RAY] Image processed, running model...")
         
         # Run analysis
         results = analyze_with_model(img_tensor)
+        
+        print(f"[CHEST X-RAY] Result: {results}")
         
         return jsonify({
             'success': True,
@@ -234,7 +262,7 @@ def analyze():
         
     except Exception as e:
         import traceback
-        print(f"[ERROR] Analyze failed: {str(e)}")
+        print(f"[CHEST X-RAY ERROR] Analyze failed: {str(e)}")
         print(traceback.format_exc())
         return jsonify({
             'success': False,

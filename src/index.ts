@@ -6,6 +6,7 @@ import { connectDatabase, prisma } from "./db/prisma.js";
 import { env } from "./env.js";
 import auth from "./auth.js";
 import cancer from "./cancer.js";
+import report from "./report-analysis.js";
 
 const app = new Hono();
 
@@ -29,6 +30,7 @@ app.get("/", (c) => {
         longitudinal: "POST /screening/longitudinal - Track changes over time",
         xray: "POST /screening/xray - Legacy X-ray analysis endpoint",
         riskPredict: "POST /screening/risk-predict - Full risk calculation",
+        reportAnalysis: "POST /screening/report-analyze - AI-powered text report analysis",
       },
       info: {
         statistics: "GET /screening/statistics/:type",
@@ -40,6 +42,7 @@ app.get("/", (c) => {
 
 app.route("/auth", auth);
 app.route("/screening", cancer);
+app.route("/screening/report", report);
 
 async function start() {
   try {
