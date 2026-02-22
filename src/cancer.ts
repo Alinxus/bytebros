@@ -252,6 +252,7 @@ cancer.post(
     const body = c.req.valid("json");
     const userId = c.get("userId");
     const apiKeyId = c.get("apiKeyId");
+    const apiKeyId = c.get("apiKeyId");
 
     if (!body.imageUrl && !body.imageBase64) {
       return c.json({ error: "imageUrl or imageBase64 required" }, 400);
@@ -775,7 +776,8 @@ cancer.post(
       const adjustedConfidence = applyQualityPenalty(baseConfidence, result.quality);
 
       try {
-        await prisma.xrayAnalysis.create({
+        if (prisma.xrayAnalysis) {
+          await prisma.xrayAnalysis.create({
           data: {
             userId,
             imageType: "mammography",
@@ -784,7 +786,8 @@ cancer.post(
             confidence: adjustedConfidence,
             findings: JSON.stringify(result),
           },
-        });
+          });
+        }
       } catch (e) {
         console.log("[DB] Warning: Failed to save", e);
       }
