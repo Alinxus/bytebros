@@ -123,8 +123,8 @@ def analyze_with_model(img_tensor, model_name='densenet121'):
     # Sort by probability
     results.sort(key=lambda x: x['probability'], reverse=True)
     
-    # Get top findings - only show high confidence results
-    findings = [r for r in results if r['probability'] > 50]
+    # Get top findings - show results above 10% probability
+    findings = [r for r in results if r['probability'] > 10]
     
     # Overall assessment
     high_risk = [r for r in results if r['risk_level'] == 'high']

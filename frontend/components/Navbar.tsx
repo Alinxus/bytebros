@@ -44,8 +44,8 @@ function Navbar() {
         >
             <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
                 
-                <a href="/" className="text-xl font-semibold tracking-tight text-foreground">
-                    BETA
+                <a href="/" className="text-xl font-bold text-foreground">
+                  CAVISTA
                 </a>
 
                 

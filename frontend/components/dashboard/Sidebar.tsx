@@ -6,7 +6,7 @@
 |-------------------------------------------------------------
 */
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Plus, FileText, ShieldCheck, Activity } from "lucide-react";
+import { LayoutDashboard, Plus, FileText, ShieldCheck, Activity, ClipboardList } from "lucide-react";
 
 /*
 |--------------------------------------------------------------
@@ -27,6 +27,7 @@ const NAV_SECTIONS = [
       { label: "New Screening", href: "/screening", icon: Plus },
       { label: "Prevention Timeline", href: "/longitudinal", icon: Activity },
       { label: "Results History", href: "/results", icon: FileText },
+      { label: "Report Analysis", href: "/report-analysis", icon: ClipboardList },
     ],
   },
   {
