@@ -1,6 +1,7 @@
 """
-Cavista ML Service - Chest X-ray Analysis
-Uses torchxrayvision with DenseNet121 pretrained on NIH dataset
+Cavista ML Service - Breast Cancer & Chest X-ray Analysis
+Uses torchxrayvision with DenseNet121 for chest X-rays
+Uses trained RF model for breast cancer prediction
 """
 import io
 import base64
@@ -29,21 +30,34 @@ models = {
 }
 models['densenet121'].eval()
 
-# Mammography RF model (optional)
+# Mammography RF model (from trained_model folder)
 MAMMO_MODEL = None
 MAMMO_SCALER = None
+MAMMO_CLASSES = None
 try:
     if joblib:
-        # Compatibility alias for models saved with numpy 2.x
-        sys.modules.setdefault("numpy._core", np.core)
-        mammo_model_path = os.path.join(os.path.dirname(__file__), "breast_cancer_model.joblib")
-        mammo_scaler_path = os.path.join(os.path.dirname(__file__), "breast_cancer_scaler.joblib")
-        if os.path.exists(mammo_model_path) and os.path.exists(mammo_scaler_path):
-            MAMMO_MODEL = joblib.load(mammo_model_path)
-            MAMMO_SCALER = joblib.load(mammo_scaler_path)
-            print("[MAMMOGRAPHY] RF model loaded")
+        # Try new trained_model folder first
+        model_path = os.path.join(os.path.dirname(__file__), "trained_model", "breast_cancer_model.joblib")
+        scaler_path = os.path.join(os.path.dirname(__file__), "trained_model", "breast_cancer_scaler.joblib")
+        classes_path = os.path.join(os.path.dirname(__file__), "trained_model", "classes.json")
+        
+        if os.path.exists(model_path) and os.path.exists(scaler_path):
+            MAMMO_MODEL = joblib.load(model_path)
+            MAMMO_SCALER = joblib.load(scaler_path)
+            with open(classes_path, 'r') as f:
+                MAMMO_CLASSES = json.load(f)
+            print(f"[MAMMOGRAPHY] Trained model loaded: {MAMMO_CLASSES}")
+        else:
+            # Fall back to old model
+            mammo_model_path = os.path.join(os.path.dirname(__file__), "breast_cancer_model.joblib")
+            mammo_scaler_path = os.path.join(os.path.dirname(__file__), "breast_cancer_scaler.joblib")
+            if os.path.exists(mammo_model_path) and os.path.exists(mammo_scaler_path):
+                MAMMO_MODEL = joblib.load(mammo_model_path)
+                MAMMO_SCALER = joblib.load(mammo_scaler_path)
+                MAMMO_CLASSES = {"names": ["malignant", "benign"]}
+                print("[MAMMOGRAPHY] Legacy RF model loaded")
 except Exception as e:
-    print(f"[MAMMOGRAPHY] Failed to load RF model: {e}")
+    print(f"[MAMMOGRAPHY] Failed to load model: {e}")
 
 # Define pathologies we can detect
 PATHOLOGIES = [
@@ -283,7 +297,7 @@ def health():
 
 @app.route('/mammography/analyze', methods=['POST'])
 def mammography_analyze():
-    """Analyze mammography/breast X-ray using RF model; fallback to DenseNet121"""
+    """Analyze mammography/breast X-ray using trained model or fallback to DenseNet121"""
     try:
         data = request.get_json()
         
@@ -301,60 +315,85 @@ def mammography_analyze():
         quality = assess_image_quality(quality_tensor)
 
         if MAMMO_MODEL and MAMMO_SCALER:
-            print("[MAMMOGRAPHY] Processing image with RF model")
+            print("[MAMMOGRAPHY] Processing with trained RF model")
             features = extract_mammo_features(img)
             features_scaled = MAMMO_SCALER.transform([features])
             prediction = MAMMO_MODEL.predict(features_scaled)[0]
             probability = MAMMO_MODEL.predict_proba(features_scaled)[0]
+            
+            # Get class names (malignant=0, benign=1 in sklearn)
+            class_names = MAMMO_CLASSES.get("names", ["malignant", "benign"]) if MAMMO_CLASSES else ["malignant", "benign"]
+            pred_label = class_names[prediction] if prediction < len(class_names) else "benign"
 
             raw_confidence = float(max(probability))
-            calibrated_confidence = 1 / (1 + np.exp(-6 * (raw_confidence - 0.5)))
-            calibrated_confidence = float(max(0.05, min(0.95, calibrated_confidence)))
-
-            # Calculate riskScore based on prediction, not just confidence
-            # If malignant: higher probability of malignant = higher risk
-            # If benign: risk is low regardless of confidence
-            if prediction == 1:
-                risk_score = probability[1] * 100  # Use malignant probability
-            else:
-                risk_score = probability[0] * 20   # Low risk for benign
+            
+            # For sklearn: class 0 = malignant, class 1 = benign
+            malignant_prob = float(probability[0])
+            benign_prob = float(probability[1])
+            
+            # Calculate risk based on prediction
+            if prediction == 0:  # malignant
+                risk_score = malignant_prob * 100
+                risk_level = "high"
+            else:  # benign
+                risk_score = (1 - benign_prob) * 20
+                risk_level = "low"
 
             return jsonify({
                 'success': True,
-                'prediction': 'malignant' if prediction == 1 else 'benign',
+                'prediction': pred_label,
                 'confidence': raw_confidence,
-                'calibratedConfidence': calibrated_confidence,
+                'calibratedConfidence': raw_confidence,
                 'riskScore': round(risk_score, 1),
                 'quality': quality,
                 'probabilities': {
-                    'benign': float(probability[0]),
-                    'malignant': float(probability[1])
+                    'benign': benign_prob,
+                    'malignant': malignant_prob
                 },
-                'riskLevel': 'high' if prediction == 1 else 'low',
-                'analysisMethod': 'breast-cancer-random-forest',
-                'note': 'Preliminary screening result. Please consult a radiologist.'
+                'riskLevel': risk_level,
+                'analysisMethod': 'breast-cancer-rf-trained',
+                'note': 'AI screening result. Please consult a radiologist.'
             })
 
-        print("[MAMMOGRAPHY] RF model unavailable, falling back to DenseNet121")
+        print("[MAMMOGRAPHY] RF model unavailable, using DenseNet121 fallback")
         img_tensor = process_image(image_data, target_size=224)
         results = analyze_with_model(img_tensor, 'densenet121')
         
         print(f"[MAMMOGRAPHY] Result: {results}")
         
+        # For mammography, be more conservative - if any abnormality detected, flag as high risk
+        has_abnormality = results.get('has_abnormality', False)
+        
+        # Calculate risk based on findings - if any medium/high finding, increase risk
+        findings = results.get('findings', [])
+        max_prob = 0
+        for f in findings:
+            if f.get('risk_level') in ['medium', 'high']:
+                max_prob = max(max_prob, f.get('probability', 0) / 100)
+        
+        if has_abnormality or max_prob > 0.3:
+            risk_level = 'high'
+            risk_score = max(50, round(max_prob * 100, 1))
+            prediction = 'malignant'
+        else:
+            risk_level = 'low'
+            risk_score = round(results.get('confidence', 0.5) * 30, 1)
+            prediction = 'benign'
+        
         return jsonify({
             'success': True,
             'analysis': results,
-            'prediction': 'malignant' if results.get('has_abnormality') else 'benign',
+            'prediction': prediction,
             'confidence': results.get('confidence', 0.85),
             'calibratedConfidence': results.get('calibrated_confidence', results.get('confidence', 0.85)),
-            'riskScore': results.get('risk_score', round(results.get('confidence', 0.85) * 100, 1)),
+            'riskScore': risk_score,
             'quality': quality,
             'probabilities': {
-                'benign': 1 - results.get('confidence', 0.85),
-                'malignant': results.get('confidence', 0.85)
+                'benign': 1 - max(0.3, max_prob),
+                'malignant': max(0.3, max_prob)
             },
-            'riskLevel': results.get('overall_risk', 'low'),
-            'analysisMethod': 'densenet121',
+            'riskLevel': risk_level,
+            'analysisMethod': 'densenet121-mammography',
             'note': 'AI analysis complete. Please consult a radiologist.'
         })
     except Exception as e:
