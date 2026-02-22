@@ -13,7 +13,7 @@ RUN python -m venv .venv
 COPY requirements.txt ./
 
 # Upgrade pip and install setuptools first (required for building numpy)
-RUN .venv/bin/pip install --upgrade pip setuptools wheel
+RUN .venv/bin/pip install --upgrade pip "setuptools<82" wheel
 
 # Install requirements
 RUN .venv/bin/pip install -r requirements.txt
