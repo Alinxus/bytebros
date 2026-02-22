@@ -1,4 +1,4 @@
-const MAMMOGRAPHY_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:5000";
+const MAMMOGRAPHY_SERVICE_URL = process.env.ML_SERVICE_URL || "https://ml-model.fly.dev";
 export async function analyzeMammography(imageBase64) {
     try {
         const response = await fetch(`${MAMMOGRAPHY_SERVICE_URL}/mammography/analyze`, {

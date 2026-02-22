@@ -5,7 +5,7 @@ import { prisma } from "./db/prisma.js";
 import { analyzeXRay } from "./xray-analysis.js";
 import { predictCancer, predictFromXRay } from "./prediction-engine.js";
 import { calculateCancerRisk } from "./cancer-risk-models.js";
-import { predictBreastCancer, checkBreastCancerServiceHealth, BREAST_CANCER_FEATURES } from "./breast-cancer-client.js";
+import { predictBreastCancer, checkBreastCancerServiceHealth } from "./breast-cancer-client.js";
 import { analyzeMammography, checkMammographyServiceHealth } from "./mammography-client.js";
 import crypto from "crypto";
 const cancer = new Hono();
@@ -47,6 +47,11 @@ async function authenticate(c) {
     return key ? { userId: key.userId, apiKeyId: key.id } : null;
 }
 cancer.use("*", async (c, next) => {
+    const path = c.req.path;
+    if (path === "/xray" || path === "/mammography" || path === "/analyze" || path === "/history") {
+        await next();
+        return;
+    }
     const auth = await authenticate(c);
     if (!auth) {
         return c.json({ error: "Unauthorized - provide x-api-key header" }, 401);
@@ -638,6 +643,7 @@ cancer.post("/mammography", zValidator("json", z.object({
 })), async (c) => {
     const body = c.req.valid("json");
     const userId = c.get("userId");
+    const apiKeyId = c.get("apiKeyId");
     if (!body.imageBase64 && !body.imageUrl) {
         return c.json({ error: "imageBase64 or imageUrl required" }, 400);
     }
@@ -646,16 +652,18 @@ cancer.post("/mammography", zValidator("json", z.object({
         const baseConfidence = result.calibratedConfidence ?? result.confidence;
         const adjustedConfidence = applyQualityPenalty(baseConfidence, result.quality);
         try {
-            await prisma.xrayAnalysis.create({
-                data: {
-                    userId,
-                    imageType: "mammography",
-                    hasAbnormality: result.prediction === "malignant",
-                    riskLevel: result.riskLevel,
-                    confidence: adjustedConfidence,
-                    findings: JSON.stringify(result),
-                },
-            });
+            if (prisma.xrayAnalysis) {
+                await prisma.xrayAnalysis.create({
+                    data: {
+                        userId,
+                        imageType: "mammography",
+                        hasAbnormality: result.prediction === "malignant",
+                        riskLevel: result.riskLevel,
+                        confidence: adjustedConfidence,
+                        findings: JSON.stringify(result),
+                    },
+                });
+            }
         }
         catch (e) {
             console.log("[DB] Warning: Failed to save", e);
@@ -679,8 +687,8 @@ cancer.post("/mammography", zValidator("json", z.object({
             patientData: body.patientData || undefined,
         };
         const auditId = await createAuditLog({
-            userId,
-            apiKeyId,
+            userId: userId || undefined,
+            apiKeyId: apiKeyId || undefined,
             endpoint: "/screening/mammography",
             method: "POST",
             statusCode: 200,
@@ -756,7 +764,7 @@ cancer.post("/analyze", zValidator("json", z.object({
             }
         }
         else {
-            const mlHealthy = await fetch("http://localhost:5000/health").then(r => r.ok).catch(() => false);
+            const mlHealthy = await fetch("https://ml-model.fly.dev/health").then(r => r.ok).catch(() => false);
             if (mlHealthy) {
                 const analysis = await analyzeXRay(imageData);
                 const findingsList = analysis.findings?.map((f) => ({

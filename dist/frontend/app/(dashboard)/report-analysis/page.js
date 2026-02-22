@@ -16,6 +16,8 @@ function ReportAnalysisPage() {
     const [isAnalyzing, setIsAnalyzing] = (0, react_1.useState)(false);
     const [result, setResult] = (0, react_1.useState)(null);
     const [error, setError] = (0, react_1.useState)("");
+    const [uploadedFile, setUploadedFile] = (0, react_1.useState)(null);
+    const [isUploading, setIsUploading] = (0, react_1.useState)(false);
     const fileInputRef = (0, react_1.useRef)(null);
     const buildEvidenceSnippets = (text, findings) => {
         if (!text || findings.length === 0)
@@ -59,45 +61,116 @@ function ReportAnalysisPage() {
         const file = e.target.files?.[0];
         if (!file)
             return;
-        if (file.type === "text/plain" || file.name.endsWith(".txt")) {
-            const text = await file.text();
-            setReportText(text);
+        setUploadedFile(file);
+        setError("");
+        try {
+            if (file.type === "text/plain" || file.name.endsWith(".txt")) {
+                const text = await file.text();
+                setReportText(text);
+            }
+            else if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+                setReportText(`[PDF Document: ${file.name}]\n\nPlease wait while we process your PDF...`);
+            }
+            else if (file.type.startsWith("image/")) {
+                setReportText(`[Image: ${file.name}]\n\nImage upload detected. Processing for text extraction...`);
+            }
+            else {
+                setError("Unsupported file type. Please upload a text file, PDF, or image.");
+                return;
+            }
         }
-        else {
-            setError("Please paste text content or upload a text file");
+        catch (err) {
+            setError("Failed to read file. Please try again.");
+        }
+    };
+    const handleDrop = (e) => {
+        e.preventDefault();
+        const file = e.dataTransfer.files[0];
+        if (file && fileInputRef.current) {
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            fileInputRef.current.files = dt.files;
+            handleFileUpload({ target: { files: dt.files } });
+        }
+    };
+    const handleDragOver = (e) => {
+        e.preventDefault();
+    };
+    const removeFile = () => {
+        setUploadedFile(null);
+        setReportText("");
+        if (fileInputRef.current) {
+            fileInputRef.current.value = "";
         }
     };
     const handleAnalyze = async () => {
-        if (!reportText.trim() || reportText.length < 10) {
-            setError("Please enter your medical report text (at least 10 characters)");
+        if ((!reportText.trim() || reportText.length < 10) && !uploadedFile) {
+            setError("Please upload a file or enter your medical report text (at least 10 characters)");
             return;
         }
         setIsAnalyzing(true);
         setError("");
         const apiKey = localStorage.getItem("cavista_api_key") || "";
         try {
-            const res = await fetch("/api/screening/report/analyze", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": apiKey,
-                },
-                body: JSON.stringify({
-                    reportText: reportText,
-                    reportType: reportType || "general",
-                }),
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                throw new Error(data.error || "Analysis failed");
+            let requestBody = {
+                reportText: reportText,
+                reportType: reportType || "general",
+            };
+            if (uploadedFile && (uploadedFile.type !== "text/plain" && !uploadedFile.name.endsWith(".txt"))) {
+                setIsUploading(true);
+                const formData = new FormData();
+                formData.append("file", uploadedFile);
+                formData.append("reportType", reportType || "general");
+                const res = await fetch("/api/screening/report/analyze/file", {
+                    method: "POST",
+                    headers: {
+                        "x-api-key": apiKey,
+                    },
+                    body: formData,
+                });
+                setIsUploading(false);
+                let data;
+                try {
+                    data = await res.json();
+                }
+                catch (parseErr) {
+                    const text = await res.text();
+                    throw new Error(text || "Invalid response from server. Please ensure the backend is running.");
+                }
+                if (!res.ok) {
+                    throw new Error(data?.error || "Analysis failed");
+                }
+                setResult(data.analysis || data);
             }
-            setResult(data.analysis);
+            else {
+                const res = await fetch("/api/screening/report/analyze", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-api-key": apiKey,
+                    },
+                    body: JSON.stringify(requestBody),
+                });
+                let data;
+                try {
+                    data = await res.json();
+                }
+                catch (parseErr) {
+                    const text = await res.text();
+                    throw new Error(text || "Invalid response from server. Please ensure the backend is running.");
+                }
+                if (!res.ok) {
+                    throw new Error(data?.error || `Server error: ${res.status}`);
+                }
+                setResult(data.analysis || data);
+            }
         }
         catch (err) {
             setError(err instanceof Error ? err.message : "Analysis failed. Please try again.");
         }
         finally {
             setIsAnalyzing(false);
+            setIsUploading(false);
         }
     };
     const handleDownload = () => {
@@ -164,7 +237,7 @@ Generated by Mira AI
     return ((0, jsx_runtime_1.jsxs)("div", { className: "max-w-4xl mx-auto", children: [(0, jsx_runtime_1.jsxs)("div", { className: "mb-6", children: [(0, jsx_runtime_1.jsx)("h1", { className: "text-2xl font-bold text-foreground", children: "AI Report Analysis" }), (0, jsx_runtime_1.jsx)("p", { className: "mt-1 text-muted", children: "Paste your medical report for easy-to-understand AI analysis" })] }), !result && !isAnalyzing && ((0, jsx_runtime_1.jsxs)("div", { className: "space-y-6", children: [(0, jsx_runtime_1.jsxs)("div", { children: [(0, jsx_runtime_1.jsx)("label", { className: "block text-sm font-medium text-foreground mb-3", children: "Report Type (optional)" }), (0, jsx_runtime_1.jsx)("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-3", children: REPORT_TYPES.map((type) => {
                                     const Icon = type.icon;
                                     return ((0, jsx_runtime_1.jsxs)("button", { onClick: () => setReportType(type.id), className: `p-4 border rounded-xl text-center transition-all ${reportType === type.id ? "border-action bg-action/5" : "border-border hover:border-action/50"}`, children: [(0, jsx_runtime_1.jsx)(Icon, { className: "w-6 h-6 mx-auto mb-2 text-muted" }), (0, jsx_runtime_1.jsx)("div", { className: "text-sm font-medium text-foreground", children: type.name })] }, type.id));
-                                }) })] }), (0, jsx_runtime_1.jsxs)("div", { children: [(0, jsx_runtime_1.jsx)("label", { className: "block text-sm font-medium text-foreground mb-3", children: "Paste your medical report" }), (0, jsx_runtime_1.jsx)("textarea", { value: reportText, onChange: (e) => setReportText(e.target.value), placeholder: "Paste your blood test results, imaging report, biopsy results, or any medical report here...\n\nExample:\nComplete Blood Count (CBC)\nWBC: 7.5 x10^9/L\nRBC: 4.8 x10^12/L\nHemoglobin: 14.2 g/dL\nPlatelets: 250 x10^9/L", className: "w-full h-64 border border-border rounded-xl p-4 text-sm bg-background text-foreground placeholder:text-muted resize-none focus:outline-none focus:border-action" })] }), error && ((0, jsx_runtime_1.jsx)("div", { className: "p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm", children: error })), (0, jsx_runtime_1.jsxs)("button", { onClick: handleAnalyze, disabled: !reportText.trim() || reportText.length < 10, className: "w-full py-4 bg-action text-white font-semibold rounded-xl hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-50", children: [(0, jsx_runtime_1.jsx)(lucide_react_1.Brain, { className: "w-5 h-5" }), "Analyze with AI"] })] })), isAnalyzing && ((0, jsx_runtime_1.jsxs)("div", { className: "text-center py-16", children: [(0, jsx_runtime_1.jsxs)("div", { className: "w-20 h-20 mx-auto mb-6 relative", children: [(0, jsx_runtime_1.jsx)("div", { className: "absolute inset-0 border-4 border-action/20 rounded-full" }), (0, jsx_runtime_1.jsx)("div", { className: "absolute inset-0 border-4 border-t-action rounded-full animate-spin" }), (0, jsx_runtime_1.jsx)(lucide_react_1.Brain, { className: "absolute inset-0 m-auto w-10 h-10 text-action" })] }), (0, jsx_runtime_1.jsx)("h3", { className: "text-xl font-semibold text-foreground mb-2", children: "Analyzing your report..." }), (0, jsx_runtime_1.jsx)("p", { className: "text-muted", children: "Our AI is translating medical terms into plain English" })] })), result && !isAnalyzing && ((0, jsx_runtime_1.jsxs)("div", { className: "space-y-6", children: [(0, jsx_runtime_1.jsx)("div", { className: "bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-6", children: (0, jsx_runtime_1.jsxs)("div", { className: "flex items-start gap-4", children: [(0, jsx_runtime_1.jsx)("div", { className: "w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center", children: (0, jsx_runtime_1.jsx)(lucide_react_1.Brain, { className: "w-6 h-6 text-blue-600" }) }), (0, jsx_runtime_1.jsxs)("div", { className: "flex-1", children: [(0, jsx_runtime_1.jsx)("h3", { className: "font-semibold text-foreground mb-2", children: "What this report means" }), (0, jsx_runtime_1.jsx)("p", { className: "text-muted leading-relaxed", children: result.summary })] })] }) }), (0, jsx_runtime_1.jsx)("div", { className: `rounded-xl p-5 ${result.riskLevel === "high" ? "bg-red-50 border border-red-200" :
+                                }) })] }), (0, jsx_runtime_1.jsxs)("div", { children: [(0, jsx_runtime_1.jsx)("label", { className: "block text-sm font-medium text-foreground mb-3", children: "Upload Report File" }), !uploadedFile ? ((0, jsx_runtime_1.jsxs)("div", { onDrop: handleDrop, onDragOver: handleDragOver, onClick: () => fileInputRef.current?.click(), className: "border-2 border-dashed border-border rounded-xl p-8 text-center cursor-pointer hover:border-action/50 hover:bg-surface transition-all", children: [(0, jsx_runtime_1.jsx)("input", { ref: fileInputRef, type: "file", accept: ".txt,.pdf,image/*", onChange: handleFileUpload, className: "hidden" }), (0, jsx_runtime_1.jsx)(lucide_react_1.Upload, { className: "w-10 h-10 mx-auto mb-4 text-muted" }), (0, jsx_runtime_1.jsx)("p", { className: "text-sm text-muted mb-2", children: "Drag and drop your report here, or click to browse" }), (0, jsx_runtime_1.jsx)("p", { className: "text-xs text-muted", children: "Supports: PDF, Text (.txt), Images (JPG, PNG)" })] })) : ((0, jsx_runtime_1.jsxs)("div", { className: "flex items-center gap-4 p-4 bg-surface border border-border rounded-xl", children: [uploadedFile.type.startsWith("image/") ? ((0, jsx_runtime_1.jsx)(lucide_react_1.Image, { className: "w-10 h-10 text-muted" })) : uploadedFile.name.endsWith(".pdf") ? ((0, jsx_runtime_1.jsx)(lucide_react_1.FileText, { className: "w-10 h-10 text-red-500" })) : ((0, jsx_runtime_1.jsx)(lucide_react_1.File, { className: "w-10 h-10 text-blue-500" })), (0, jsx_runtime_1.jsxs)("div", { className: "flex-1", children: [(0, jsx_runtime_1.jsx)("p", { className: "text-sm font-medium text-foreground", children: uploadedFile.name }), (0, jsx_runtime_1.jsxs)("p", { className: "text-xs text-muted", children: [(uploadedFile.size / 1024).toFixed(1), " KB"] })] }), (0, jsx_runtime_1.jsx)("button", { onClick: removeFile, className: "p-2 hover:bg-background rounded-lg", children: (0, jsx_runtime_1.jsx)(lucide_react_1.X, { className: "w-5 h-5 text-muted" }) })] }))] }), (0, jsx_runtime_1.jsxs)("div", { children: [(0, jsx_runtime_1.jsx)("label", { className: "block text-sm font-medium text-foreground mb-3", children: "Or paste your medical report" }), (0, jsx_runtime_1.jsx)("textarea", { value: reportText, onChange: (e) => setReportText(e.target.value), placeholder: "Paste your blood test results, imaging report, biopsy results, or any medical report here...\n\nExample:\nComplete Blood Count (CBC)\nWBC: 7.5 x10^9/L\nRBC: 4.8 x10^12/L\nHemoglobin: 14.2 g/dL\nPlatelets: 250 x10^9/L", className: "w-full h-48 border border-border rounded-xl p-4 text-sm bg-background text-foreground placeholder:text-muted resize-none focus:outline-none focus:border-action" })] }), error && ((0, jsx_runtime_1.jsx)("div", { className: "p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm", children: error })), (0, jsx_runtime_1.jsxs)("button", { onClick: handleAnalyze, disabled: (!reportText.trim() || reportText.length < 10) && !uploadedFile || isAnalyzing || isUploading, className: "w-full py-4 bg-action text-white font-semibold rounded-xl hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-50", children: [(isAnalyzing || isUploading) ? ((0, jsx_runtime_1.jsx)(lucide_react_1.Loader2, { className: "w-5 h-5 animate-spin" })) : ((0, jsx_runtime_1.jsx)(lucide_react_1.Brain, { className: "w-5 h-5" })), isUploading ? "Processing file..." : "Analyze with AI"] })] })), isAnalyzing && ((0, jsx_runtime_1.jsxs)("div", { className: "text-center py-16", children: [(0, jsx_runtime_1.jsxs)("div", { className: "w-20 h-20 mx-auto mb-6 relative", children: [(0, jsx_runtime_1.jsx)("div", { className: "absolute inset-0 border-4 border-action/20 rounded-full" }), (0, jsx_runtime_1.jsx)("div", { className: "absolute inset-0 border-4 border-t-action rounded-full animate-spin" }), (0, jsx_runtime_1.jsx)(lucide_react_1.Brain, { className: "absolute inset-0 m-auto w-10 h-10 text-action" })] }), (0, jsx_runtime_1.jsx)("h3", { className: "text-xl font-semibold text-foreground mb-2", children: "Analyzing your report..." }), (0, jsx_runtime_1.jsx)("p", { className: "text-muted", children: "Our AI is translating medical terms into plain English" })] })), result && !isAnalyzing && ((0, jsx_runtime_1.jsxs)("div", { className: "space-y-6", children: [(0, jsx_runtime_1.jsx)("div", { className: "bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-6", children: (0, jsx_runtime_1.jsxs)("div", { className: "flex items-start gap-4", children: [(0, jsx_runtime_1.jsx)("div", { className: "w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center", children: (0, jsx_runtime_1.jsx)(lucide_react_1.Brain, { className: "w-6 h-6 text-blue-600" }) }), (0, jsx_runtime_1.jsxs)("div", { className: "flex-1", children: [(0, jsx_runtime_1.jsx)("h3", { className: "font-semibold text-foreground mb-2", children: "What this report means" }), (0, jsx_runtime_1.jsx)("p", { className: "text-muted leading-relaxed", children: result.summary })] })] }) }), (0, jsx_runtime_1.jsx)("div", { className: `rounded-xl p-5 ${result.riskLevel === "high" ? "bg-red-50 border border-red-200" :
                             result.riskLevel === "medium" ? "bg-yellow-50 border border-yellow-200" :
                                 result.riskLevel === "low" ? "bg-green-50 border border-green-200" :
                                     "bg-gray-50 border border-gray-200"}`, children: (0, jsx_runtime_1.jsxs)("div", { className: "flex items-center gap-3", children: [result.riskLevel === "high" || result.riskLevel === "medium" ? ((0, jsx_runtime_1.jsx)(lucide_react_1.AlertCircle, { className: `w-6 h-6 ${result.riskLevel === "high" ? "text-red-600" : "text-yellow-600"}` })) : ((0, jsx_runtime_1.jsx)(lucide_react_1.CheckCircle, { className: "w-6 h-6 text-green-600" })), (0, jsx_runtime_1.jsxs)("div", { children: [(0, jsx_runtime_1.jsxs)("div", { className: "font-semibold text-foreground", children: ["Risk Level: ", (0, jsx_runtime_1.jsx)("span", { className: "uppercase", children: result.riskLevel })] }), (0, jsx_runtime_1.jsx)("p", { className: "text-sm text-muted", children: result.riskLevel === "high" ? "Follow-up recommended soon" :

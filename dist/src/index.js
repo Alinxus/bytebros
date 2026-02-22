@@ -2,7 +2,7 @@ import "dotenv/config";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
-import { connectDatabase, prisma } from "./db/prisma.js";
+import { connectDatabase } from "./db/prisma.js";
 import { env } from "./env.js";
 import auth from "./auth.js";
 import cancer from "./cancer.js";
