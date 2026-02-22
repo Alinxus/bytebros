@@ -131,19 +131,19 @@ function NewScreeningPage() {
     let totalWeight = 0;
 
     for (const model of analysisResults) {
-      // Use ML model's risk assessment directly (now calibrated)
+      // Use ML model's risk assessment directly
       const maxProb = Math.max(...model.findings.map(f => f.probability), 0);
       
       let score: number;
-      if (maxProb >= 65 || model.riskLevel === "high") {
-        score = 80; // High risk
-      } else if (maxProb >= 35 || model.riskLevel === "medium") {
-        score = 50; // Medium risk
+      if (model.riskLevel === "high" || maxProb >= 55) {
+        score = 75;
+      } else if (model.riskLevel === "medium" || maxProb >= 40) {
+        score = 45;
       } else {
-        score = 15; // Low risk - default to low
+        score = 20;
       }
       
-      const weight = Math.max(0.5, Math.min(1, model.confidence / 100));
+      const weight = Math.max(0.5, model.confidence);
       inputs.push({ label: model.name, score, weight });
       totalWeighted += score * weight;
       totalWeight += weight;
@@ -152,9 +152,9 @@ function NewScreeningPage() {
     const storedRisk = getStoredRiskAssessment();
     if (storedRisk?.overallRisk || storedRisk?.riskLevel) {
       const score = storedRisk.overallRisk ?? riskLevelToScore(storedRisk.riskLevel || "low");
-      inputs.push({ label: "Patient Risk Profile", score, weight: 0.9 });
-      totalWeighted += score * 0.9;
-      totalWeight += 0.9;
+      inputs.push({ label: "Patient Risk Profile", score, weight: 0.85 });
+      totalWeighted += score * 0.85;
+      totalWeight += 0.85;
     }
 
     const consensusScore = totalWeight > 0 ? Math.round(totalWeighted / totalWeight) : 0;

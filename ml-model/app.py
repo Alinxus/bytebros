@@ -124,7 +124,7 @@ def process_image(image_data, target_size=224):
         raise ValueError(f"Failed to process image: {str(e)}")
 
 def analyze_with_model(img_tensor, model_name='densenet121'):
-    """Run inference on the image with proper calibration"""
+    """Run inference on the image with balanced calibration"""
     model = models[model_name]
     
     with torch.no_grad():
@@ -134,9 +134,8 @@ def analyze_with_model(img_tensor, model_name='densenet121'):
     num_classes = output.shape[1]
     print(f"[DEBUG] Model output classes: {num_classes}")
     
-    # Get raw logits and apply temperature scaling for calibration
-    # Higher temperature = more conservative (lower probabilities)
-    TEMPERATURE = 2.5  # Calibration temperature
+    # Get raw probabilities with light temperature scaling for better calibration
+    TEMPERATURE = 1.2  # Lighter temperature for more accurate probabilities
     scaled_logits = output / TEMPERATURE
     probs = torch.softmax(scaled_logits, dim=1).squeeze().numpy()
     
@@ -154,8 +153,7 @@ def analyze_with_model(img_tensor, model_name='densenet121'):
         prob = float(probs[i])
         pathology = xrv_pathologies[i]
         
-        # More conservative risk levels with calibrated probabilities
-        # Only flag as high/medium if we're very confident
+        # Risk levels based on actual probabilities
         risk_level = 'low'
         if prob > 0.50:
             risk_level = 'high'
@@ -171,63 +169,45 @@ def analyze_with_model(img_tensor, model_name='densenet121'):
     # Sort by probability
     results.sort(key=lambda x: x['probability'], reverse=True)
 
-    # Only show findings with meaningful confidence (>25%)
-    findings = [r for r in results if r["probability"] > 25]
+    # Show findings above 30% threshold
+    findings = [r for r in results if r["probability"] > 30]
     
-    # Get max probability and top findings
-    max_prob = max([r['probability'] for r in results]) / 100 if results else 0
+    # Get max probability
     max_prob_raw = max([r['probability'] for r in results]) if results else 0
+    max_prob = max_prob_raw / 100
     
-    # Critical pathologies that need immediate attention
+    # Critical pathologies
     critical_pathologies = {"Mass", "Nodule", "Lung Lesion", "Pneumothorax", "Pneumonia"}
-    significant_pathologies = {"Effusion", "Consolidation", "Atelectasis", "Cardiomegaly", "Edema"}
-    
-    # Count high confidence findings
     high_conf_findings = [r for r in results if r["probability"] >= 50]
-    medium_conf_findings = [r for r in results if r["probability"] >= 25 and r["probability"] < 50]
-    
     critical_hits = [r for r in high_conf_findings if r["pathology"] in critical_pathologies]
-    significant_hits = [r for r in high_conf_findings if r["pathology"] in significant_pathologies]
     
-    # Calculate calibrated confidence
-    # Only high if we have high probability findings
-    if max_prob >= 0.50:
-        calibrated_confidence = max_prob
-    elif max_prob >= 0.25:
-        calibrated_confidence = max_prob * 0.7
-    else:
-        calibrated_confidence = max_prob * 0.5
+    # Confidence based on max probability
+    raw_confidence = max_prob
     
-    # Determine overall risk with stricter criteria
-    if max_prob_raw < 25:
-        # Very low confidence - likely normal
+    # Determine overall risk - balanced approach
+    if max_prob_raw < 30:
         overall_risk = 'low'
-        risk_score = max(5, max_prob_raw * 0.3)
+        risk_score = max(10, max_prob_raw * 0.4)
         recommendation = 'No significant abnormalities detected'
     elif len(critical_hits) >= 1:
-        # Critical finding with high confidence
+        overall_risk = 'high'
+        risk_score = max(80, max_prob_raw)
+        recommendation = 'Immediate medical consultation recommended'
+    elif max_prob_raw >= 70:
         overall_risk = 'high'
         risk_score = max(75, max_prob_raw)
-        recommendation = 'Immediate medical consultation recommended - critical finding detected'
-    elif max_prob_raw >= 65:
-        # High probability abnormality
-        overall_risk = 'high'
-        risk_score = max(70, max_prob_raw)
-        recommendation = 'Medical consultation recommended - significant finding detected'
-    elif max_prob_raw >= 50 or (len(high_conf_findings) >= 2):
-        # Moderate confidence
+        recommendation = 'Medical consultation recommended'
+    elif max_prob_raw >= 55:
         overall_risk = 'medium'
-        risk_score = max(40, max_prob_raw * 0.8)
+        risk_score = max(50, max_prob_raw)
         recommendation = 'Follow-up with specialist recommended'
-    elif max_prob_raw >= 35:
-        # Lower confidence but notable
+    elif max_prob_raw >= 40:
         overall_risk = 'medium'
-        risk_score = max(25, max_prob_raw * 0.7)
+        risk_score = max(35, max_prob_raw * 0.9)
         recommendation = 'Routine follow-up recommended'
     else:
-        # Very low confidence
         overall_risk = 'low'
-        risk_score = max(5, max_prob_raw * 0.4)
+        risk_score = max(10, max_prob_raw * 0.5)
         recommendation = 'No significant abnormalities detected'
 
     return {
@@ -238,8 +218,8 @@ def analyze_with_model(img_tensor, model_name='densenet121'):
         'findings': findings,
         'all_pathologies': results,
         'has_abnormality': overall_risk != 'low',
-        'confidence': float(calibrated_confidence),
-        'calibrated_confidence': float(calibrated_confidence)
+        'confidence': float(raw_confidence),
+        'calibrated_confidence': float(max(raw_confidence, 0.7))
     }
 
 def assess_image_quality(img_tensor):
