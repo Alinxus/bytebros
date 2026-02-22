@@ -60,15 +60,23 @@ def process_image(image_data, target_size=224):
             img = Image.open(io.BytesIO(image_data)).convert('L')
         
         # Resize
-        img = img.resize((target_size, target_size), Image.LANCZOS)
+        img = img.resize((target_size, target_size), Image.Resampling.LANCZOS)
         
-        # Convert to tensor - keep grayscale (1 channel) for xrv model
-        transform = T.Compose([
-            T.ToTensor(),
-            T.Normalize(mean=[0.5], std=[0.5]),  # Simple normalization for grayscale
-        ])
+        # Convert to numpy array and normalize properly for xrv
+        import numpy as np
+        img_np = np.array(img).astype(np.float32) / 255.0
         
-        img_tensor = transform(img)
+        # Apply xrv normalization
+        img_np = xrv.utils.normalize(img_np, 255)
+        
+        # Convert to 3-channel by repeating (xrv models expect 3-channel)
+        if len(img_np.shape) == 2:
+            img_np = np.stack([img_np] * 3, axis=0)
+        else:
+            img_np = img_np.transpose(2, 0, 1)
+        
+        # Convert to tensor
+        img_tensor = torch.from_numpy(img_np).float()
         img_tensor = img_tensor.unsqueeze(0)  # Add batch dimension
         
         return img_tensor
@@ -98,8 +106,8 @@ def analyze_with_model(img_tensor, model_name='densenet121'):
     # Sort by probability
     results.sort(key=lambda x: x['probability'], reverse=True)
     
-    # Get top findings
-    findings = [r for r in results if r['probability'] > 30]
+    # Get top findings - only show high confidence results
+    findings = [r for r in results if r['probability'] > 50]
     
     # Overall assessment
     high_risk = [r for r in results if r['risk_level'] == 'high']
