@@ -14,6 +14,10 @@ import torchvision.transforms as T
 from PIL import Image
 import warnings
 warnings.filterwarnings('ignore')
+try:
+    import joblib
+except Exception:
+    joblib = None
 
 app = Flask(__name__)
 
@@ -23,6 +27,20 @@ models = {
     'densenet121': xrv.models.DenseNet(weights='densenet121-res224-all'),
 }
 models['densenet121'].eval()
+
+# Mammography RF model (optional)
+MAMMO_MODEL = None
+MAMMO_SCALER = None
+try:
+    if joblib:
+        mammo_model_path = os.path.join(os.path.dirname(__file__), "breast_cancer_model.joblib")
+        mammo_scaler_path = os.path.join(os.path.dirname(__file__), "breast_cancer_scaler.joblib")
+        if os.path.exists(mammo_model_path) and os.path.exists(mammo_scaler_path):
+            MAMMO_MODEL = joblib.load(mammo_model_path)
+            MAMMO_SCALER = joblib.load(mammo_scaler_path)
+            print("[MAMMOGRAPHY] RF model loaded")
+except Exception as e:
+    print(f"[MAMMOGRAPHY] Failed to load RF model: {e}")
 
 # Define pathologies we can detect
 PATHOLOGIES = [
@@ -216,28 +234,92 @@ def assess_image_quality(img_tensor):
             "error": str(e),
         }
 
+def extract_mammo_features(image):
+    """Extract simple statistical features from mammography image"""
+    img = image.convert('L')
+    img = img.resize((100, 100))
+    arr = np.array(img)
+
+    features = []
+    features.append(np.mean(arr) / 255.0 * 30)
+    features.append(np.std(arr) / 255.0 * 30)
+    features.append(np.percentile(arr, 90) / 255.0 * 100)
+    features.append(np.sum(arr > 128) / arr.size * 1000)
+
+    h, w = arr.shape
+    for region in [
+        arr[:h//2, :w//2],
+        arr[:h//2, w//2:],
+        arr[h//2:, :w//2],
+        arr[h//2:, w//2:],
+        arr[h//3:2*h//3, w//3:2*w//3],
+    ]:
+        features.append(np.mean(region) / 255.0 * 30)
+        features.append(np.std(region) / 255.0 * 30)
+        features.append(np.percentile(region, 75) / 255.0 * 30)
+        features.append(np.percentile(region, 25) / 255.0 * 30)
+
+    edges = np.abs(np.diff(arr, axis=0)).mean() + np.abs(np.diff(arr, axis=1)).mean()
+    features.append(edges / 255.0 * 10)
+
+    while len(features) < 30:
+        features.append(features[len(features) % 10])
+
+    return features[:30]
+
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'healthy', 'model': 'densenet121'})
 
 @app.route('/mammography/analyze', methods=['POST'])
 def mammography_analyze():
-    """Analyze mammography/breast X-ray using DenseNet121"""
+    """Analyze mammography/breast X-ray using RF model; fallback to DenseNet121"""
     try:
         data = request.get_json()
         
         if not data or 'image' not in data:
             return jsonify({'error': 'image (base64) required'}), 400
         
-        print("[MAMMOGRAPHY] Processing image with DenseNet121")
         image_data = data['image']
+        if ',' in image_data:
+            image_data = image_data.split(',')[1]
+
+        img_bytes = base64.b64decode(image_data)
+        img = Image.open(io.BytesIO(img_bytes))
+
+        quality_tensor = process_image(image_data, target_size=224)
+        quality = assess_image_quality(quality_tensor)
+
+        if MAMMO_MODEL and MAMMO_SCALER:
+            print("[MAMMOGRAPHY] Processing image with RF model")
+            features = extract_mammo_features(img)
+            features_scaled = MAMMO_SCALER.transform([features])
+            prediction = MAMMO_MODEL.predict(features_scaled)[0]
+            probability = MAMMO_MODEL.predict_proba(features_scaled)[0]
+
+            raw_confidence = float(max(probability))
+            calibrated_confidence = 1 / (1 + np.exp(-6 * (raw_confidence - 0.5)))
+            calibrated_confidence = float(max(0.05, min(0.95, calibrated_confidence)))
+
+            return jsonify({
+                'success': True,
+                'prediction': 'malignant' if prediction == 1 else 'benign',
+                'confidence': raw_confidence,
+                'calibratedConfidence': calibrated_confidence,
+                'riskScore': round(raw_confidence * 100, 1),
+                'quality': quality,
+                'probabilities': {
+                    'benign': float(probability[0]),
+                    'malignant': float(probability[1])
+                },
+                'riskLevel': 'high' if prediction == 1 else 'low',
+                'analysisMethod': 'breast-cancer-random-forest',
+                'note': 'Preliminary screening result. Please consult a radiologist.'
+            })
+
+        print("[MAMMOGRAPHY] RF model unavailable, falling back to DenseNet121")
         img_tensor = process_image(image_data, target_size=224)
-        quality = assess_image_quality(img_tensor)
-        
-        # Use the same DenseNet121 model
         results = analyze_with_model(img_tensor, 'densenet121')
-        
-        findings = results.get('all_pathologies', results.get('findings', []))
         
         print(f"[MAMMOGRAPHY] Result: {results}")
         

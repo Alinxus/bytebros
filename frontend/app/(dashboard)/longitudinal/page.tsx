@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, TrendingUp, TrendingDown, Minus, Activity, Calendar, AlertTriangle, CheckCircle, Share2, Download } from "lucide-react";
+import { useState, useEffect } from "react";
+import { TrendingUp, TrendingDown, Minus, Activity, Calendar, AlertTriangle, CheckCircle, Share2, Download, RefreshCw, FileText } from "lucide-react";
 
 type ScanEntry = {
   id: string;
@@ -35,7 +35,7 @@ function LongitudinalPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [analysis, setAnalysis] = useState<LongitudinalAnalysis | null>(null);
   const [error, setError] = useState("");
-  const chartRef = useRef<HTMLDivElement>(null);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
 
   const buildProjection = (sortedScans: ScanEntry[], months = 12): ProjectionPoint[] => {
     if (sortedScans.length < 2) return [];
@@ -82,44 +82,63 @@ function LongitudinalPage() {
     return projection;
   };
 
-  // Load saved scans from localStorage on mount
-  useEffect(() => {
-    const saved = localStorage.getItem("cavista_longitudinal_scans");
-    if (saved) {
-      try {
-        setScans(JSON.parse(saved));
-      } catch {
-        // ignore
+  const fetchHistory = async () => {
+    setIsLoading(true);
+    setError("");
+    try {
+      const apiKey = localStorage.getItem("cavista_api_key") || "";
+      const res = await fetch("/api/screening/history", {
+        headers: { "x-api-key": apiKey },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Unable to load history.");
+        return;
       }
+
+      const scansFromHistory: ScanEntry[] = [];
+      data.history?.xrayAnalyses?.forEach((x: any) => {
+        const riskScore = x.riskLevel === "high" ? 80 : x.riskLevel === "medium" ? 50 : 20;
+        scansFromHistory.push({
+          id: x.id,
+          date: new Date(x.date).toISOString().split("T")[0],
+          type: x.imageType === "mammography" ? "Mammogram" : "Chest X-Ray",
+          result: x.hasAbnormality ? "Abnormal" : "Normal",
+          riskScore,
+          findings: x.riskLevel,
+        });
+      });
+      data.history?.predictions?.forEach((p: any) => {
+        const riskScore = p.result === "malignant" ? 80 : 30;
+        scansFromHistory.push({
+          id: p.id,
+          date: new Date(p.date).toISOString().split("T")[0],
+          type: "Prediction",
+          result: p.result || "Completed",
+          riskScore,
+          findings: p.type,
+        });
+      });
+
+      scansFromHistory.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      setScans(scansFromHistory);
+      setLastUpdated(new Date().toLocaleString());
+    } catch {
+      setError("Unable to load history.");
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  useEffect(() => {
+    fetchHistory();
   }, []);
 
-  // Save scans to localStorage
   useEffect(() => {
-    if (scans.length > 0) {
-      localStorage.setItem("cavista_longitudinal_scans", JSON.stringify(scans));
+    if (scans.length >= 2) {
+      handleAnalyze();
     }
   }, [scans]);
-
-  const handleAddScan = () => {
-    const newScan: ScanEntry = {
-      id: Math.random().toString(36).substr(2, 9),
-      date: new Date().toISOString().split("T")[0],
-      type: "Chest X-Ray",
-      result: "Normal",
-      riskScore: 20,
-      findings: "",
-    };
-    setScans([...scans, newScan]);
-  };
-
-  const handleRemoveScan = (id: string) => {
-    setScans(scans.filter((s) => s.id !== id));
-  };
-
-  const handleScanChange = (id: string, field: keyof ScanEntry, value: string | number) => {
-    setScans(scans.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
-  };
 
   const handleAnalyze = async () => {
     if (scans.length < 2) {
@@ -294,10 +313,24 @@ Mira - Prevention Through Early Detection
   return (
     <div className="max-w-5xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Prevention Timeline</h1>
-        <p className="mt-1 text-muted">
-          Track your health over time. Compare past scans to detect patterns and trends before they become problems.
-        </p>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Prevention Timeline</h1>
+            <p className="mt-1 text-muted">
+              Automated longitudinal analysis based on your past scans and reports.
+            </p>
+            {lastUpdated && (
+              <div className="text-xs text-muted mt-1">Last updated: {lastUpdated}</div>
+            )}
+          </div>
+          <button
+            onClick={fetchHistory}
+            className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg text-sm text-foreground hover:bg-surface"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh History
+          </button>
+        </div>
       </div>
 
       {/* Timeline Visualization */}
@@ -338,83 +371,45 @@ Mira - Prevention Through Early Detection
         </div>
       )}
 
-      {/* Add Scans */}
+      {/* History-based Scans */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-foreground">Your Scans</h3>
-          <button
-            onClick={handleAddScan}
-            className="flex items-center gap-2 px-4 py-2 bg-action text-white text-sm font-medium rounded-lg hover:opacity-90"
-          >
-            <Plus className="w-4 h-4" />
-            Add Past Scan
-          </button>
+          <h3 className="text-lg font-semibold text-foreground">History-Based Scans</h3>
+          <div className="text-xs text-muted">Auto-synced from screenings and reports</div>
         </div>
 
-        {scans.length === 0 ? (
+        {isLoading ? (
+          <div className="border border-border rounded-xl p-8 text-center">
+            <p className="text-muted">Loading history...</p>
+          </div>
+        ) : scans.length === 0 ? (
           <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
-            <Calendar className="w-12 h-12 mx-auto text-muted mb-4" />
-            <p className="text-foreground font-medium">No scans added yet</p>
-            <p className="text-sm text-muted mt-1">Add your past scan results to track changes over time</p>
+            <FileText className="w-12 h-12 mx-auto text-muted mb-4" />
+            <p className="text-foreground font-medium">No history yet</p>
+            <p className="text-sm text-muted mt-1">
+              Run a screening or report analysis to generate your timeline automatically.
+            </p>
           </div>
         ) : (
           <div className="space-y-3">
             {scans.map((scan) => (
               <div key={scan.id} className="bg-surface border border-border rounded-xl p-4">
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                   <div>
-                    <label className="block text-xs text-muted mb-1">Date</label>
-                    <input
-                      type="date"
-                      value={scan.date}
-                      onChange={(e) => handleScanChange(scan.id, "date", e.target.value)}
-                      className="w-full border border-border bg-background px-3 py-2 text-sm rounded-lg"
-                    />
+                    <div className="text-xs text-muted">Date</div>
+                    <div className="text-sm text-foreground">{scan.date}</div>
                   </div>
                   <div>
-                    <label className="block text-xs text-muted mb-1">Scan Type</label>
-                    <select
-                      value={scan.type}
-                      onChange={(e) => handleScanChange(scan.id, "type", e.target.value)}
-                      className="w-full border border-border bg-background px-3 py-2 text-sm rounded-lg"
-                    >
-                      <option value="Chest X-Ray">Chest X-Ray</option>
-                      <option value="Mammogram">Mammogram</option>
-                      <option value="CT Scan">CT Scan</option>
-                      <option value="Risk Assessment">Risk Assessment</option>
-                    </select>
+                    <div className="text-xs text-muted">Type</div>
+                    <div className="text-sm text-foreground">{scan.type}</div>
                   </div>
                   <div>
-                    <label className="block text-xs text-muted mb-1">Result</label>
-                    <select
-                      value={scan.result}
-                      onChange={(e) => handleScanChange(scan.id, "result", e.target.value)}
-                      className="w-full border border-border bg-background px-3 py-2 text-sm rounded-lg"
-                    >
-                      <option value="Normal">Normal</option>
-                      <option value="Abnormal">Abnormal</option>
-                      <option value="Follow-up">Follow-up Required</option>
-                    </select>
+                    <div className="text-xs text-muted">Result</div>
+                    <div className="text-sm text-foreground">{scan.result}</div>
                   </div>
                   <div>
-                    <label className="block text-xs text-muted mb-1">Risk Score (%)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={scan.riskScore}
-                      onChange={(e) => handleScanChange(scan.id, "riskScore", parseInt(e.target.value) || 0)}
-                      className="w-full border border-border bg-background px-3 py-2 text-sm rounded-lg"
-                    />
-                  </div>
-                  <div>
-                    <button
-                      onClick={() => handleRemoveScan(scan.id)}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Remove
-                    </button>
+                    <div className="text-xs text-muted">Risk Score</div>
+                    <div className="text-sm text-foreground">{scan.riskScore}%</div>
                   </div>
                 </div>
               </div>
@@ -429,21 +424,12 @@ Mira - Prevention Through Early Detection
         </div>
       )}
 
-      {/* Analyze Button */}
-      <button
-        onClick={handleAnalyze}
-        disabled={isLoading || scans.length < 2}
-        className="w-full py-4 bg-action text-white font-semibold rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
-      >
-        {isLoading ? (
-          <>Analyzing...</>
-        ) : (
-          <>
-            <Activity className="w-5 h-5" />
-            Analyze Trends
-          </>
-        )}
-      </button>
+      {/* Auto-analysis Notice */}
+      {scans.length >= 2 && (
+        <div className="mb-4 p-3 bg-surface border border-border rounded-lg text-xs text-muted">
+          Timeline insights are computed automatically from your saved history.
+        </div>
+      )}
 
       {/* Results */}
       {analysis && (

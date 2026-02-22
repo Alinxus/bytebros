@@ -252,7 +252,6 @@ cancer.post(
     const body = c.req.valid("json");
     const userId = c.get("userId");
     const apiKeyId = c.get("apiKeyId");
-    const apiKeyId = c.get("apiKeyId");
 
     if (!body.imageUrl && !body.imageBase64) {
       return c.json({ error: "imageUrl or imageBase64 required" }, 400);
