@@ -6,6 +6,7 @@ interface MLAnalysisResult {
     model: string;
     overall_risk: "low" | "medium" | "high";
     recommendation: string;
+    risk_score?: number;
     findings: Array<{
       pathology: string;
       probability: number;
@@ -18,6 +19,14 @@ interface MLAnalysisResult {
     }>;
     has_abnormality: boolean;
     confidence: number;
+    calibrated_confidence?: number;
+  };
+  quality?: {
+    quality: "good" | "poor" | "unknown";
+    issues: string[];
+    mean_intensity?: number;
+    std_intensity?: number;
+    blur_score?: number;
   };
   error?: string;
 }

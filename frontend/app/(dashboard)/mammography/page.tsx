@@ -16,6 +16,12 @@ type MammoResult = {
   analysis: {
     prediction: string;
     confidence: number;
+    calibratedConfidence?: number;
+    riskScore?: number;
+    quality?: {
+      quality: "good" | "poor" | "unknown";
+      issues: string[];
+    };
     probabilities: { benign: number; malignant: number };
     riskLevel: string;
   };
@@ -189,7 +195,7 @@ const MammographyPage = () => {
               <div>
                 <p className="text-xs text-muted mb-1">Confidence</p>
                 <p className="text-lg font-semibold text-foreground">
-                  {(result.analysis.confidence * 100).toFixed(1)}%
+                  {((result.analysis.calibratedConfidence ?? result.analysis.confidence) * 100).toFixed(1)}%
                 </p>
               </div>
               <div>
@@ -207,6 +213,44 @@ const MammographyPage = () => {
                 </p>
               </div>
             </div>
+
+            {result.analysis.riskScore !== undefined && (
+              <div className="mb-4">
+                <p className="text-xs text-muted mb-1">Risk Score</p>
+                <p className="text-sm font-semibold text-foreground">
+                  {result.analysis.riskScore}/100
+                </p>
+              </div>
+            )}
+
+            {result.analysis.quality && (
+              <div className={`mb-4 rounded-lg border p-3 ${
+                result.analysis.quality.quality === "poor"
+                  ? "bg-yellow-50 border-yellow-200"
+                  : "bg-green-50 border-green-200"
+              }`}>
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div>
+                    <p className="text-xs font-medium text-foreground">Image Quality Check</p>
+                    <p className="text-xs text-muted">Low-quality images reduce confidence.</p>
+                  </div>
+                  <p className={`text-xs font-semibold uppercase ${
+                    result.analysis.quality.quality === "poor" ? "text-yellow-700" : "text-green-700"
+                  }`}>
+                    {result.analysis.quality.quality}
+                  </p>
+                </div>
+                {result.analysis.quality.issues.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {result.analysis.quality.issues.map((issue, i) => (
+                      <span key={i} className="text-xs bg-background border border-border rounded-full px-2 py-0.5 text-muted">
+                        {issue.replace(/_/g, " ")}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <p className="text-xs text-muted mb-2">Probability Breakdown</p>
             <div className="grid grid-cols-2 gap-4">

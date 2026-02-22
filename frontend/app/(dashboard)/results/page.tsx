@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FileText, Filter, Download, AlertCircle, CheckCircle } from "lucide-react";
+import { FileText, Filter, Download, AlertCircle, CheckCircle, Info } from "lucide-react";
 
 type ScanResult = {
   id: string;
@@ -16,6 +16,7 @@ function ResultsPage() {
   const [results, setResults] = useState<ScanResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "low" | "medium" | "high">("all");
+  const [isDemoMode, setIsDemoMode] = useState(false);
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -52,9 +53,10 @@ function ResultsPage() {
           // Sort by date descending
           scans.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
           setResults(scans);
+          setIsDemoMode(scans.length === 0);
         }
       } catch {
-        // History not available
+        setIsDemoMode(true);
       }
 
       setIsLoading(false);
@@ -63,9 +65,39 @@ function ResultsPage() {
     fetchHistory();
   }, []);
 
+  // Demo data for when no history exists
+  const demoResults: ScanResult[] = [
+    {
+      id: "demo-1",
+      type: "Chest X-Ray Analysis",
+      date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      result: "No abnormalities detected",
+      riskLevel: "low",
+      details: "Clear lung fields, normal cardiac silhouette"
+    },
+    {
+      id: "demo-2",
+      type: "Mammography Screening",
+      date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      result: "BI-RADS Category 1 - Negative",
+      riskLevel: "low",
+      details: "No masses, calcifications, or suspicious findings"
+    },
+    {
+      id: "demo-3",
+      type: "Breast Cancer Risk Assessment",
+      date: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
+      result: "Low Risk",
+      riskLevel: "low",
+      details: "5-year risk: 0.8%, Lifetime risk: 12%"
+    }
+  ];
+
   const filteredResults = filter === "all" 
-    ? results 
-    : results.filter(r => r.riskLevel === filter);
+    ? results.length > 0 ? results : demoResults
+    : (results.length > 0 ? results : demoResults).filter(r => r.riskLevel === filter);
+
+  const displayResults = results.length > 0 ? results : demoResults;
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -75,6 +107,18 @@ function ResultsPage() {
           View all your past screening results
         </p>
       </div>
+
+      {isDemoMode && (
+        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
+          <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-blue-800">Demo Mode</p>
+            <p className="text-sm text-blue-600 mt-1">
+              Showing sample results. Complete a screening to see your actual results here.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
@@ -170,27 +214,27 @@ function ResultsPage() {
       )}
 
       {/* Summary */}
-      {results.length > 0 && (
+      {displayResults.length > 0 && (
         <div className="mt-8 grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-surface border border-border rounded-xl p-4 text-center">
-            <p className="text-2xl font-bold text-foreground">{results.length}</p>
+            <p className="text-2xl font-bold text-foreground">{displayResults.length}</p>
             <p className="text-sm text-muted">Total Screenings</p>
           </div>
           <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
             <p className="text-2xl font-bold text-green-700">
-              {results.filter(r => r.riskLevel === "low").length}
+              {displayResults.filter(r => r.riskLevel === "low").length}
             </p>
             <p className="text-sm text-green-600">Low Risk</p>
           </div>
           <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-center">
             <p className="text-2xl font-bold text-yellow-700">
-              {results.filter(r => r.riskLevel === "medium").length}
+              {displayResults.filter(r => r.riskLevel === "medium").length}
             </p>
             <p className="text-sm text-yellow-600">Medium Risk</p>
           </div>
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
             <p className="text-2xl font-bold text-red-700">
-              {results.filter(r => r.riskLevel === "high").length}
+              {displayResults.filter(r => r.riskLevel === "high").length}
             </p>
             <p className="text-sm text-red-600">High Risk</p>
           </div>

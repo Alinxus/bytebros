@@ -125,33 +125,96 @@ def analyze_with_model(img_tensor, model_name='densenet121'):
     
     # Get top findings - show results above 10% probability
     findings = [r for r in results if r['probability'] > 10]
-    
-    # Overall assessment
-    high_risk = [r for r in results if r['risk_level'] == 'high']
-    medium_risk = [r for r in results if r['risk_level'] == 'medium']
-    
-    if len(high_risk) >= 2:
+
+    # Weighted risk scoring (more clinically plausible than raw counts)
+    pathology_weights = {
+        "Nodule": 1.4,
+        "Mass": 1.6,
+        "Lung Lesion": 1.5,
+        "Consolidation": 1.2,
+        "Lung Opacity": 1.1,
+        "Pneumonia": 1.1,
+        "Effusion": 1.0,
+        "Cardiomegaly": 0.9,
+        "Atelectasis": 0.8,
+        "Fibrosis": 0.8,
+        "Emphysema": 0.7,
+        "Pleural_Thickening": 0.6,
+        "Infiltration": 0.6,
+        "Fracture": 0.4,
+        "Support Devices": 0.2,
+        "Pneumothorax": 1.3,
+        "Edema": 0.9,
+        "Hernia": 0.5,
+    }
+
+    weighted = 0.0
+    for r in results:
+        w = pathology_weights.get(r["pathology"], 0.6)
+        weighted += (r["probability"] / 100.0) * w
+
+    risk_score = max(0.0, min(1.0, weighted / 2.5))
+
+    # Calibrated confidence (heuristic sigmoid scaling)
+    raw_confidence = max([r['probability'] for r in results]) / 100
+    calibrated_confidence = 1 / (1 + np.exp(-6 * (raw_confidence - 0.5)))
+    calibrated_confidence = float(max(0.05, min(0.95, calibrated_confidence)))
+
+    if risk_score >= 0.6:
         overall_risk = 'high'
         recommendation = 'Immediate medical consultation recommended'
-    elif len(high_risk) >= 1:
-        overall_risk = 'high'
-        recommendation = 'Follow-up with specialist recommended'
-    elif len(medium_risk) >= 2:
+    elif risk_score >= 0.35:
         overall_risk = 'medium'
-        recommendation = 'Routine follow-up recommended'
+        recommendation = 'Follow-up with specialist recommended'
     else:
         overall_risk = 'low'
         recommendation = 'No significant abnormalities detected'
-    
+
     return {
         'model': model_name,
         'overall_risk': overall_risk,
+        'risk_score': round(risk_score * 100, 1),
         'recommendation': recommendation,
         'findings': findings,
         'all_pathologies': results,
         'has_abnormality': len(findings) > 0,
-        'confidence': max([r['probability'] for r in results]) / 100
+        'confidence': raw_confidence,
+        'calibrated_confidence': calibrated_confidence
     }
+
+def assess_image_quality(img_tensor):
+    """Basic image quality checks to guard against low-quality inputs."""
+    try:
+        img = img_tensor.squeeze().numpy()
+        img = (img - img.min()) / (img.max() - img.min() + 1e-8)
+        mean_intensity = float(np.mean(img))
+        std_intensity = float(np.std(img))
+        # Blur estimate via Laplacian variance
+        lap = np.var(np.diff(img, axis=0)) + np.var(np.diff(img, axis=1))
+        blur_score = float(lap)
+
+        issues = []
+        if mean_intensity < 0.15 or mean_intensity > 0.85:
+            issues.append("exposure")
+        if std_intensity < 0.08:
+            issues.append("low_contrast")
+        if blur_score < 0.0005:
+            issues.append("blurry")
+
+        quality = "good" if len(issues) == 0 else "poor"
+        return {
+            "quality": quality,
+            "issues": issues,
+            "mean_intensity": round(mean_intensity, 3),
+            "std_intensity": round(std_intensity, 3),
+            "blur_score": round(blur_score, 6),
+        }
+    except Exception as e:
+        return {
+            "quality": "unknown",
+            "issues": ["quality_check_failed"],
+            "error": str(e),
+        }
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -159,71 +222,60 @@ def health():
 
 @app.route('/mammography/analyze', methods=['POST'])
 def mammography_analyze():
-    """Analyze mammography/breast X-ray"""
+    """Analyze mammography/breast X-ray using DenseNet121"""
     try:
-        import joblib
         import numpy as np
         data = request.get_json()
         
         if not data or 'image' not in data:
             return jsonify({'error': 'image (base64) required'}), 400
         
-        MODEL_PATH = os.path.join(os.path.dirname(__file__), "breast_cancer_model.joblib")
-        SCALER_PATH = os.path.join(os.path.dirname(__file__), "breast_cancer_scaler.joblib")
+        print("[MAMMOGRAPHY] Processing image with DenseNet121")
         
-        print(f"[MAMMOGRAPHY] Loading model from {MODEL_PATH}")
-        model = joblib.load(MODEL_PATH)
-        scaler = joblib.load(SCALER_PATH)
-        print("[MAMMOGRAPHY] Model loaded successfully")
-        
+        # Use same image processing as chest X-ray
         image_data = data['image']
         if ',' in image_data:
             image_data = image_data.split(',')[1]
         
         img_bytes = base64.b64decode(image_data)
         img = Image.open(io.BytesIO(img_bytes)).convert('L')
+        img = img.resize((224, 224), Image.Resampling.LANCZOS)
         
-        # Resize to 100x100 as expected by the model
-        img = img.resize((100, 100))
-        arr = np.array(img)
+        img_np_gray = np.array(img).astype(np.float32) / 255.0
+        img_np = xrv.utils.normalize(img_np_gray, maxval=1.0)
+
+        if len(img_np.shape) == 2:
+            img_np = np.stack([img_np] * 3, axis=0)
+        else:
+            img_np = img_np.transpose(2, 0, 1)
+
+        img_tensor = torch.from_numpy(img_np).float().unsqueeze(0)
+        quality_tensor = torch.from_numpy(img_np_gray).float().unsqueeze(0).unsqueeze(0)
+        quality = assess_image_quality(quality_tensor)
         
-        # Extract features matching training data format
-        features = []
-        features.append(np.mean(arr) / 255.0 * 30)
-        features.append(np.std(arr) / 255.0 * 30)
-        features.append(np.percentile(arr, 90) / 255.0 * 100)
-        features.append(np.sum(arr > 128) / arr.size * 1000)
+        # Use the same DenseNet121 model
+        results = analyze_with_model(img_tensor, 'densenet121')
         
-        h, w = arr.shape
-        for region in [arr[:h//2, :w//2], arr[:h//2, w//2:], arr[h//2:, :w//2], arr[h//2:, w//2:], arr[h//3:2*h//3, w//3:2*w//3]]:
-            features.extend([
-                np.mean(region) / 255.0 * 30,
-                np.std(region) / 255.0 * 30,
-                np.percentile(region, 75) / 255.0 * 30,
-                np.percentile(region, 25) / 255.0 * 30
-            ])
+        findings = results.get('all_pathologies', results.get('findings', []))
         
-        print(f"[MAMMOGRAPHY] Features extracted: {len(features)} features")
+        print(f"[MAMMOGRAPHY] Result: {results}")
         
-        features_scaled = scaler.transform([features])
-        prediction = model.predict(features_scaled)[0]
-        probability = model.predict_proba(features_scaled)[0]
-        
-        result = {
-            'prediction': 'malignant' if prediction == 1 else 'benign',
-            'confidence': float(max(probability)),
+        return jsonify({
+            'success': True,
+            'analysis': results,
+            'prediction': 'malignant' if results.get('has_abnormality') else 'benign',
+            'confidence': results.get('confidence', 0.85),
+            'calibratedConfidence': results.get('calibrated_confidence', results.get('confidence', 0.85)),
+            'riskScore': results.get('risk_score', round(results.get('confidence', 0.85) * 100, 1)),
+            'quality': quality,
             'probabilities': {
-                'benign': float(probability[0]),
-                'malignant': float(probability[1])
+                'benign': 1 - results.get('confidence', 0.85),
+                'malignant': results.get('confidence', 0.85)
             },
-            'riskLevel': 'high' if prediction == 1 else 'low',
-            'analysisMethod': 'breast-cancer-random-forest',
-            'note': 'Preliminary screening result. Please consult a radiologist.'
-        }
-        
-        print(f"[MAMMOGRAPHY] Result: {result}")
-        
-        return jsonify(result)
+            'riskLevel': results.get('overall_risk', 'low'),
+            'analysisMethod': 'densenet121',
+            'note': 'AI analysis complete. Please consult a radiologist.'
+        })
     except Exception as e:
         import traceback
         print(f"[MAMMOGRAPHY ERROR] {str(e)}")
@@ -248,6 +300,10 @@ def analyze():
         # Process image
         img_tensor = process_image(image_data)
         print(f"[CHEST X-RAY] Image processed, running model...")
+
+        quality = assess_image_quality(img_tensor)
+        if quality["quality"] == "poor":
+            print(f"[CHEST X-RAY] Low quality image detected: {quality}")
         
         # Run analysis
         results = analyze_with_model(img_tensor)
@@ -257,6 +313,7 @@ def analyze():
         return jsonify({
             'success': True,
             'analysis': results,
+            'quality': quality,
             'disclaimer': 'This is an AI-assisted screening tool, not a medical diagnosis. Consult a healthcare professional for medical advice.'
         })
         

@@ -8,7 +8,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Cavista - Prevention Through Early Detection",
+  title: "Mira - Prevention Through Early Detection",
   description: "AI-powered cancer prevention platform. Catch cancer before it starts through early detection and risk assessment.",
 };
 

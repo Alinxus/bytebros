@@ -3,6 +3,12 @@ const MAMMOGRAPHY_SERVICE_URL = process.env.MAMMOGRAPHY_SERVICE_URL || "http://l
 interface MammographyResult {
   prediction: "benign" | "malignant";
   confidence: number;
+  calibratedConfidence?: number;
+  riskScore?: number;
+  quality?: {
+    quality: "good" | "poor" | "unknown";
+    issues: string[];
+  };
   probabilities: {
     benign: number;
     malignant: number;

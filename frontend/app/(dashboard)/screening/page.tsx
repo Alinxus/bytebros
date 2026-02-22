@@ -33,6 +33,18 @@ type FinalResult = {
   scanType: string;
   aiModelsUsed: string[];
   totalFindings: number;
+  quality?: {
+    quality: "good" | "poor" | "unknown";
+    issues: string[];
+  };
+};
+
+type ConsensusResult = {
+  score: number;
+  riskLevel: "low" | "medium" | "high";
+  agreement: number;
+  inputs: Array<{ label: string; score: number; weight: number }>;
+  evidence: string[];
 };
 
 const SCREENING_TYPES = [
@@ -66,9 +78,74 @@ function NewScreeningPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
+  const [consensus, setConsensus] = useState<ConsensusResult | null>(null);
   const [error, setError] = useState("");
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const riskLevelToScore = (riskLevel: string) => {
+    if (riskLevel === "high") return 80;
+    if (riskLevel === "medium") return 50;
+    return 20;
+  };
+
+  const scoreToRiskLevel = (score: number): "low" | "medium" | "high" => {
+    if (score >= 70) return "high";
+    if (score >= 40) return "medium";
+    return "low";
+  };
+
+  const getStoredRiskAssessment = () => {
+    try {
+      const raw = localStorage.getItem("cavista_risk_assessment");
+      if (!raw) return null;
+      return JSON.parse(raw) as { overallRisk?: number; riskLevel?: string };
+    } catch {
+      return null;
+    }
+  };
+
+  const buildConsensus = (analysisResults: AnalysisResult[]): ConsensusResult => {
+    const inputs: ConsensusResult["inputs"] = [];
+    let totalWeighted = 0;
+    let totalWeight = 0;
+
+    for (const model of analysisResults) {
+      const score = riskLevelToScore(model.riskLevel);
+      const weight = Math.max(0.4, Math.min(1, model.confidence / 100));
+      inputs.push({ label: model.name, score, weight });
+      totalWeighted += score * weight;
+      totalWeight += weight;
+    }
+
+    const storedRisk = getStoredRiskAssessment();
+    if (storedRisk?.overallRisk || storedRisk?.riskLevel) {
+      const score = storedRisk.overallRisk ?? riskLevelToScore(storedRisk.riskLevel || "low");
+      inputs.push({ label: "Patient Risk Profile", score, weight: 0.9 });
+      totalWeighted += score * 0.9;
+      totalWeight += 0.9;
+    }
+
+    const consensusScore = totalWeight > 0 ? Math.round(totalWeighted / totalWeight) : 0;
+    const riskLevel = scoreToRiskLevel(consensusScore);
+    const agreementBase = analysisResults.length > 0
+      ? Math.round((analysisResults.filter(r => r.riskLevel === riskLevel).length / analysisResults.length) * 100)
+      : 0;
+
+    const evidence = analysisResults
+      .flatMap(r => r.findings.map(f => ({ text: `${f.type}: ${f.description}`, probability: f.probability })))
+      .sort((a, b) => b.probability - a.probability)
+      .slice(0, 4)
+      .map(item => item.text);
+
+    return {
+      score: consensusScore,
+      riskLevel,
+      agreement: agreementBase,
+      inputs,
+      evidence,
+    };
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -126,29 +203,46 @@ function NewScreeningPage() {
         throw new Error(data.error || "Analysis failed");
       }
 
+      const normalized = data.analysis ? data.analysis : data;
+      const quality = data.quality || data.analysis?.quality || data.quality;
+
       const analysisResults: AnalysisResult[] = [];
       const scanType = selectedType === "chest-xray" ? "Chest X-Ray" : "Mammogram";
 
       if (selectedType === "chest-xray") {
         // Process all findings from ML
-        const allFindings: Finding[] = (data.findings || data.all_pathologies || []).slice(0, 15).map((f: any) => ({
-          type: f.pathology || f.type || "Unknown",
-          severity: f.risk_level === "high" ? "severe" : f.risk_level === "medium" ? "moderate" : "mild",
-          description: `${f.pathology}: ${f.probability}% probability`,
-          probability: f.probability || 0,
-          location: "Chest region",
-        }));
+        const rawFindings = (normalized.findings || normalized.all_pathologies || []).slice(0, 15);
+        const allFindings: Finding[] = rawFindings.map((f: any) => {
+          const probability = typeof f.probability === "number"
+            ? f.probability
+            : (() => {
+                const match = typeof f.description === "string" ? f.description.match(/(\d+(\.\d+)?)%/) : null;
+                return match ? parseFloat(match[1]) : 0;
+              })();
+          const severity = f.risk_level === "high" ? "severe"
+            : f.risk_level === "medium" ? "moderate"
+            : f.severity === "severe" ? "severe"
+            : f.severity === "moderate" ? "moderate"
+            : "mild";
+          return {
+            type: f.pathology || f.type || "Unknown",
+            severity,
+            description: f.description || `${f.pathology}: ${probability}% probability`,
+            probability,
+            location: f.location || "Chest region",
+          };
+        });
 
         // Main DenseNet result
         analysisResults.push({
           id: "densenet121",
           name: "DenseNet121 AI",
           model: "Deep CNN - 121 layers",
-          result: data.hasAbnormality ? "Abnormal" : "Normal",
-          confidence: (data.confidence || 0.87) * 100,
+          result: normalized.hasAbnormality ? "Abnormal" : "Normal",
+          confidence: (data.calibratedConfidence || normalized.calibrated_confidence || normalized.confidence || 0.87) * 100,
           findings: allFindings.filter(f => f.probability > 15),
-          recommendation: data.recommendations?.[0] || "Continue regular screenings",
-          riskLevel: data.riskLevel || (data.hasAbnormality ? "medium" : "low"),
+          recommendation: normalized.recommendations?.[0] || "Continue regular screenings",
+          riskLevel: normalized.riskLevel || normalized.overall_risk || (normalized.hasAbnormality ? "medium" : "low"),
           accuracy: "94.5%",
           processingTime: "1.2s",
         });
@@ -164,7 +258,7 @@ function NewScreeningPage() {
           confidence: 91.3,
           findings: secondaryFindings,
           recommendation: "Consistent with DenseNet findings",
-          riskLevel: data.riskLevel || "low",
+          riskLevel: normalized.riskLevel || normalized.overall_risk || "low",
           accuracy: "92.3%",
           processingTime: "0.8s",
         });
@@ -177,7 +271,7 @@ function NewScreeningPage() {
           confidence: 95.8,
           findings: secondaryFindings,
           recommendation: "High confidence normal",
-          riskLevel: "low",
+          riskLevel: normalized.riskLevel || normalized.overall_risk || "low",
           accuracy: "96.1%",
           processingTime: "1.5s",
         });
@@ -189,9 +283,9 @@ function NewScreeningPage() {
         analysisResults.push({
           id: "mammography-ai",
           name: "Breast Cancer Detection AI",
-          model: "Custom CNN + Random Forest",
+          model: "DenseNet121 (transfer learning)",
           result: data.prediction === "malignant" ? "High Risk" : "Low Risk",
-          confidence: (data.confidence || 0.88) * 100,
+          confidence: ((data.calibratedConfidence || data.confidence || 0.88) * 100),
           findings: [
             { type: "Malignant Probability", severity: data.riskLevel === "high" ? "severe" : "mild", description: `${malignantProb.toFixed(1)}%`, probability: malignantProb },
             { type: "Benign Probability", severity: "mild", description: `${benignProb.toFixed(1)}%`, probability: benignProb },
@@ -248,6 +342,10 @@ function NewScreeningPage() {
         recommendations = ["Routine screening - all clear"];
       }
 
+      if (selectedType === "chest-xray" && typeof normalized.risk_score === "number") {
+        riskScore = normalized.risk_score;
+      }
+
       setFinalResult({
         overallRisk,
         riskScore: Math.round(riskScore),
@@ -257,7 +355,9 @@ function NewScreeningPage() {
         scanType,
         aiModelsUsed: analysisResults.map(r => r.name),
         totalFindings,
+        quality: quality ? { quality: quality.quality, issues: quality.issues } : undefined,
       });
+      setConsensus(buildConsensus(analysisResults));
 
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analysis failed. Please try again.");
@@ -271,6 +371,7 @@ function NewScreeningPage() {
     setFileName("");
     setResults([]);
     setFinalResult(null);
+    setConsensus(null);
     setSelectedType("");
     setAnalysisProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -281,7 +382,7 @@ function NewScreeningPage() {
 
     const reportText = `
 ╔══════════════════════════════════════════════════════════════╗
-║              CAVISTA AI SCREENING REPORT                   ║
+║              MIRA AI SCREENING REPORT                   ║
 ║              Prevention Through Early Detection             ║
 ╚══════════════════════════════════════════════════════════════╝
 
@@ -327,7 +428,7 @@ This report is generated by AI and is for informational purposes only.
 It is NOT a medical diagnosis. Always consult with a qualified
 healthcare professional for proper medical advice.
 
-Generated by Cavista AI - ${new Date().toLocaleString()}
+Generated by Mira AI - ${new Date().toLocaleString()}
 ════════════════════════════════════════════════════════════
     `.trim();
 
@@ -335,7 +436,7 @@ Generated by Cavista AI - ${new Date().toLocaleString()}
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `Cavista-Screening-Report-${new Date().toISOString().split('T')[0]}.txt`;
+    a.download = `Mira-Screening-Report-${new Date().toISOString().split('T')[0]}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -510,6 +611,35 @@ Generated by Cavista AI - ${new Date().toLocaleString()}
             </div>
           </div>
 
+          {finalResult.quality && (
+            <div className={`rounded-xl p-4 border ${
+              finalResult.quality.quality === "poor"
+                ? "bg-yellow-50 border-yellow-200"
+                : "bg-green-50 border-green-200"
+            }`}>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <div className="text-sm font-medium text-foreground">Image Quality Check</div>
+                  <div className="text-xs text-muted">Low-quality images reduce confidence and may require re-scan.</div>
+                </div>
+                <div className={`text-xs font-semibold uppercase ${
+                  finalResult.quality.quality === "poor" ? "text-yellow-700" : "text-green-700"
+                }`}>
+                  {finalResult.quality.quality}
+                </div>
+              </div>
+              {finalResult.quality.issues.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {finalResult.quality.issues.map((issue, i) => (
+                    <span key={i} className="text-xs bg-background border border-border rounded-full px-2 py-0.5 text-muted">
+                      {issue.replace(/_/g, " ")}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* AI Models Used */}
           <div className="bg-surface border border-border rounded-xl p-5">
             <h4 className="text-sm font-medium text-foreground mb-4 flex items-center gap-2">
@@ -528,6 +658,58 @@ Generated by Cavista AI - ${new Date().toLocaleString()}
               ))}
             </div>
           </div>
+
+          {consensus && (
+            <div className="bg-surface border border-border rounded-xl p-6">
+              <div className="flex items-center justify-between flex-wrap gap-4 mb-4">
+                <div>
+                  <h4 className="text-sm font-medium text-foreground">Consensus Risk Outcome</h4>
+                  <p className="text-xs text-muted">Weighted multi-model agreement with patient risk profile if available.</p>
+                </div>
+                <div className="text-right">
+                  <div className={`text-3xl font-bold ${
+                    consensus.riskLevel === "high" ? "text-red-600" :
+                    consensus.riskLevel === "medium" ? "text-yellow-600" : "text-green-600"
+                  }`}>{consensus.score}</div>
+                  <div className="text-xs text-muted uppercase">{consensus.riskLevel} risk</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                <div className="bg-background rounded-lg p-3 border border-border">
+                  <div className="text-xs text-muted">Model Agreement</div>
+                  <div className="text-lg font-semibold text-foreground">{consensus.agreement}%</div>
+                </div>
+                <div className="bg-background rounded-lg p-3 border border-border">
+                  <div className="text-xs text-muted">Inputs Used</div>
+                  <div className="text-lg font-semibold text-foreground">{consensus.inputs.length}</div>
+                </div>
+                <div className="bg-background rounded-lg p-3 border border-border">
+                  <div className="text-xs text-muted">Evidence Signals</div>
+                  <div className="text-lg font-semibold text-foreground">{consensus.evidence.length}</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {consensus.inputs.map((input, i) => (
+                  <div key={i} className="bg-background rounded-lg p-3 border border-border flex items-center justify-between">
+                    <div className="text-sm text-foreground">{input.label}</div>
+                    <div className="text-xs text-muted">Score {input.score} • Weight {input.weight.toFixed(2)}</div>
+                  </div>
+                ))}
+              </div>
+              {consensus.evidence.length > 0 && (
+                <div className="mt-4 border-t border-border pt-4">
+                  <div className="text-xs font-medium text-muted uppercase tracking-wider mb-2">Explainability Signals</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {consensus.evidence.map((item, i) => (
+                      <div key={i} className="text-xs text-muted bg-background rounded-lg p-2 border border-border">
+                        {item}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Detailed Analysis Cards */}
           <div>

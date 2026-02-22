@@ -68,7 +68,7 @@ function Footer() {
                 </div>
                 <div className="mt-12 pt-6 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-4">
                     <p className="text-xs text-muted">
-                        &copy; {new Date().getFullYear()} Cavista. All rights reserved.
+                        &copy; {new Date().getFullYear()} Mira. All rights reserved.
                     </p>
                     <p className="text-xs text-muted">
                         Built for early cancer detection.

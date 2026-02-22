@@ -12,6 +12,11 @@ export interface XRayResult {
   confidence: number;
   cancerType?: string;
   model?: string;
+  riskScore?: number;
+  quality?: {
+    quality: "good" | "poor" | "unknown";
+    issues: string[];
+  };
 }
 
 interface Finding {
@@ -70,8 +75,13 @@ export async function analyzeXRay(
         findings,
         recommendations: [analysis.recommendation],
         riskLevel: analysis.overall_risk,
-        confidence: analysis.confidence,
+        confidence: analysis.calibrated_confidence ?? analysis.confidence,
         model: "densenet121",
+        riskScore: analysis.risk_score,
+        quality: mlResult.quality ? {
+          quality: mlResult.quality.quality,
+          issues: mlResult.quality.issues,
+        } : undefined,
         cancerType: analysis.findings.some(f => 
           ["lung lesion", "mass", "nodule"].includes(f.pathology.toLowerCase())
         ) ? "lung" : undefined

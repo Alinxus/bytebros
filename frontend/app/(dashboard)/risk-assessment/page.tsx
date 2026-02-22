@@ -113,6 +113,14 @@ const RiskAssessmentPage = () => {
       }
 
       setResult(data);
+      try {
+        localStorage.setItem("cavista_risk_assessment", JSON.stringify({
+          ...data.riskAssessment,
+          storedAt: new Date().toISOString(),
+        }));
+      } catch {
+        // ignore storage errors
+      }
     } catch {
       setError("Network error. Please try again.");
     } finally {

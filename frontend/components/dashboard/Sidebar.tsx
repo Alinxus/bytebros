@@ -55,7 +55,7 @@ const Sidebar = () => {
           className="text-lg font-semibold tracking-tight text-foreground"
           tabIndex={0}
         >
-          CAVISTA
+          MIRA
         </a>
         <p className="text-xs text-muted mt-1">Early Detection AI</p>
       </div>
