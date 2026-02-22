@@ -245,6 +245,30 @@ const MammographyPage = () => {
               </div>
             )}
 
+            {result.analysis.birads && (
+              <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="text-xs text-blue-600 font-medium mb-1">BI-RADS Assessment</p>
+                <p className="text-2xl font-bold text-blue-800">{result.analysis.birads}</p>
+                <p className="text-xs text-blue-700 mt-1">{result.analysis.recommendation}</p>
+              </div>
+            )}
+
+            {result.analysis.model_info && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <p className="text-xs font-medium text-foreground mb-2">Model Information</p>
+                <div className="text-xs text-muted space-y-1">
+                  <p><span className="font-medium">Model:</span> {result.analysis.model_info.name}</p>
+                  <p><span className="font-medium">Training:</span> {result.analysis.model_info.finetuning}</p>
+                  {result.analysis.model_info.accuracy && (
+                    <p><span className="font-medium">Accuracy:</span> {result.analysis.model_info.accuracy}</p>
+                  )}
+                  {result.analysis.model_info.sensitivity && (
+                    <p><span className="font-medium">Sensitivity:</span> {result.analysis.model_info.sensitivity}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {result.analysis.quality && (
               <div className={`mb-4 rounded-lg border p-3 ${
                 result.analysis.quality.quality === "poor"
