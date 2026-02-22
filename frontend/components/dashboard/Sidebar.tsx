@@ -6,8 +6,7 @@
 |-------------------------------------------------------------
 */
 import { usePathname } from "next/navigation";
-import {  Square, Hexagon, Circle, ArrowRightLeft, Triangle } from "lucide-react";
-import { LayoutDashboard, ScanHeart, Scan, HeartPulse, History, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Plus, FileText, ShieldCheck, Activity } from "lucide-react";
 
 /*
 |--------------------------------------------------------------
@@ -23,26 +22,25 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    label: "Screening",
+    label: "Prevention",
     items: [
-      { label: "Chest X-Ray", href: "/chest-xray", icon : ScanHeart },
-      { label: "Mammography", href: "/mammography", icon: Scan },
-      { label: "Breast Cancer", href: "/breast-cancer", icon: HeartPulse },
+      { label: "New Screening", href: "/screening", icon: Plus },
+      { label: "Prevention Timeline", href: "/longitudinal", icon: Activity },
+      { label: "Results History", href: "/results", icon: FileText },
     ],
   },
   {
-    label: "Analysis",
+    label: "Assessment",
     items: [
-      { label: "Longitudinal", href: "/longitudinal", icon: History },
-      { label: "Risk Assessment", href: "/risk-assessment", icon: ShieldCheck },
+      { label: "Risk Profile", href: "/risk-assessment", icon: ShieldCheck },
     ],
   },
 ] as const;
 
 /*
-|----------------------------------------------------------------
+|--------------------------------------------------------------
 | Sidebar Component
-|----------------------------------------------------------------
+|-------------------------------------------------------------
 */
 const Sidebar = () => {
   const pathname = usePathname();
@@ -56,8 +54,9 @@ const Sidebar = () => {
           className="text-lg font-semibold tracking-tight text-foreground"
           tabIndex={0}
         >
-          BETA
+          CAVISTA
         </a>
+        <p className="text-xs text-muted mt-1">Early Detection AI</p>
       </div>
       <nav
         className="flex-1 px-3 py-4 overflow-y-auto"
@@ -76,9 +75,9 @@ const Sidebar = () => {
                   <li key={item.href}>
                     <a
                       href={item.href}
-                      className={`flex items-center gap-3 px-3 py-2 text-sm transition-colors ${
+                      className={`flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-colors ${
                         isActive
-                          ? "bg-surface text-foreground font-medium"
+                          ? "bg-action/10 text-action font-medium"
                           : "text-muted hover:text-foreground hover:bg-surface"
                       }`}
                       tabIndex={0}
@@ -98,7 +97,10 @@ const Sidebar = () => {
         ))}
       </nav>
       <div className="px-6 py-4 border-t border-border">
-        <p className="text-xs text-muted">Cavista v2.0</p>
+        <div className="bg-action/5 rounded-lg p-3">
+          <p className="text-xs font-medium text-action">Need Help?</p>
+          <p className="text-xs text-muted mt-1">Contact your healthcare provider for medical advice.</p>
+        </div>
       </div>
     </aside>
   );

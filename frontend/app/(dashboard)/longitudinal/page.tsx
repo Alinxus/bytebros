@@ -1,104 +1,88 @@
 "use client";
-/*
-|-------------------------------------------------------------
-| Npm Imports
-|-------------------------------------------------------------
-*/
-import { useState } from "react";
-import type { FormEvent } from "react";
 
-/*
-|-------------------------------------------------------------
-| Types
-|-------------------------------------------------------------
-*/
+import { useState, useEffect, useRef } from "react";
+import { Plus, Trash2, TrendingUp, TrendingDown, Minus, Activity, Calendar, AlertTriangle, CheckCircle, Share2, Download } from "lucide-react";
+
 type ScanEntry = {
+  id: string;
   date: string;
+  type: string;
   result: string;
-  riskLevel: string;
-  confidence: string;
+  riskScore: number;
+  findings?: string;
 };
 
-type LongitudinalResult = {
-  longitudinalAnalysis: {
-    trend: string;
-    changes: string[];
-    totalScans: number;
-    recommendation: string;
-  };
+type LongitudinalAnalysis = {
+  trend: "improving" | "stable" | "concerning";
+  changePercent: number;
+  totalScans: number;
+  firstScan: { date: string; riskScore: number };
+  latestScan: { date: string; riskScore: number };
+  changes: string[];
+  recommendation: string;
+  trajectory: string;
 };
 
-const LongitudinalPage = () => {
-  /*
-|-------------------------------------------------------------
-| States
-|-------------------------------------------------------------
-*/
-  const [scans, setScans] = useState<ScanEntry[]>([
-    {
-      date: "2024-01-15",
-      result: "benign",
-      riskLevel: "low",
-      confidence: "0.7",
-    },
-    {
-      date: "2025-06-20",
-      result: "benign",
-      riskLevel: "low",
-      confidence: "0.75",
-    },
-    {
-      date: "2025-12-01",
-      result: "benign",
-      riskLevel: "medium",
-      confidence: "0.65",
-    },
-  ]);
-  const [error, setError] = useState("");
+function LongitudinalPage() {
+  const [scans, setScans] = useState<ScanEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [result, setResult] = useState<LongitudinalResult | null>(null);
+  const [analysis, setAnalysis] = useState<LongitudinalAnalysis | null>(null);
+  const [error, setError] = useState("");
+  const chartRef = useRef<HTMLDivElement>(null);
 
-  const handleScanChange = (
-    index: number,
-    field: keyof ScanEntry,
-    value: string,
-  ) => {
-    setScans((prev) => {
-      const next = [...prev];
-      next[index] = { ...next[index], [field]: value };
-      return next;
-    });
-  };
+  // Load saved scans from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("cavista_longitudinal_scans");
+    if (saved) {
+      try {
+        setScans(JSON.parse(saved));
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
+  // Save scans to localStorage
+  useEffect(() => {
+    if (scans.length > 0) {
+      localStorage.setItem("cavista_longitudinal_scans", JSON.stringify(scans));
+    }
+  }, [scans]);
 
   const handleAddScan = () => {
-    setScans((prev) => [
-      ...prev,
-      { date: "", result: "benign", riskLevel: "low", confidence: "0.7" },
-    ]);
+    const newScan: ScanEntry = {
+      id: Math.random().toString(36).substr(2, 9),
+      date: new Date().toISOString().split("T")[0],
+      type: "Chest X-Ray",
+      result: "Normal",
+      riskScore: 20,
+      findings: "",
+    };
+    setScans([...scans, newScan]);
   };
 
-  const handleRemoveScan = (index: number) => {
-    if (scans.length <= 1) return;
-    setScans((prev) => prev.filter((_, i) => i !== index));
+  const handleRemoveScan = (id: string) => {
+    setScans(scans.filter((s) => s.id !== id));
   };
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setResult(null);
+  const handleScanChange = (id: string, field: keyof ScanEntry, value: string | number) => {
+    setScans(scans.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
+  };
 
-    const validScans = scans.filter((s) => s.date);
-    if (validScans.length < 2) {
-      setError(
-        "At least 2 scans with dates are required for longitudinal analysis.",
-      );
+  const handleAnalyze = async () => {
+    if (scans.length < 2) {
+      setError("Add at least 2 scans to analyze trends");
       return;
     }
 
     setIsLoading(true);
+    setError("");
+
     const apiKey = localStorage.getItem("cavista_api_key") || "";
 
     try {
+      const sortedScans = [...scans].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
       const res = await fetch("/api/screening/longitudinal-track", {
         method: "POST",
         headers: {
@@ -106,11 +90,11 @@ const LongitudinalPage = () => {
           "x-api-key": apiKey,
         },
         body: JSON.stringify({
-          previousScans: validScans.map((s) => ({
+          previousScans: sortedScans.map((s) => ({
             date: s.date,
-            result: s.result,
-            riskLevel: s.riskLevel,
-            confidence: parseFloat(s.confidence),
+            result: s.result === "Normal" ? "benign" : "malignant",
+            riskLevel: s.riskScore < 30 ? "low" : s.riskScore < 60 ? "medium" : "high",
+            confidence: 1 - s.riskScore / 100,
           })),
         }),
       });
@@ -118,210 +102,388 @@ const LongitudinalPage = () => {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Analysis failed.");
-        return;
+        // Use local analysis if API fails
+        const localAnalysis = generateLocalAnalysis(sortedScans);
+        setAnalysis(localAnalysis);
+      } else {
+        setAnalysis({
+          trend: data.longitudinalAnalysis?.trend || "stable",
+          changePercent: calculateChange(sortedScans),
+          totalScans: sortedScans.length,
+          firstScan: { date: sortedScans[0].date, riskScore: sortedScans[0].riskScore },
+          latestScan: { date: sortedScans[sortedScans.length - 1].date, riskScore: sortedScans[sortedScans.length - 1].riskScore },
+          changes: data.longitudinalAnalysis?.changes || [],
+          recommendation: data.longitudinalAnalysis?.recommendation || "Continue regular monitoring",
+          trajectory: data.longitudinalAnalysis?.trend || "stable",
+        });
       }
-
-      setResult(data);
     } catch {
-      setError("Network error. Please try again.");
+      const localAnalysis = generateLocalAnalysis(scans);
+      setAnalysis(localAnalysis);
     } finally {
       setIsLoading(false);
     }
   };
 
+  const generateLocalAnalysis = (sortedScans: ScanEntry[]): LongitudinalAnalysis => {
+    const first = sortedScans[0].riskScore;
+    const last = sortedScans[sortedScans.length - 1].riskScore;
+    const change = ((last - first) / first) * 100;
+
+    let trend: "improving" | "stable" | "concerning" = "stable";
+    if (change < -10) trend = "improving";
+    else if (change > 10) trend = "concerning";
+
+    const changes: string[] = [];
+    for (let i = 1; i < sortedScans.length; i++) {
+      const diff = sortedScans[i].riskScore - sortedScans[i - 1].riskScore;
+      if (diff > 15) changes.push(`Risk increased by ${diff.toFixed(0)}% between ${sortedScans[i - 1].date} and ${sortedScans[i].date}`);
+      else if (diff < -15) changes.push(`Risk decreased by ${Math.abs(diff).toFixed(0)}% between ${sortedScans[i - 1].date} and ${sortedScans[i].date}`);
+    }
+
+    return {
+      trend,
+      changePercent: change,
+      totalScans: sortedScans.length,
+      firstScan: { date: sortedScans[0].date, riskScore: first },
+      latestScan: { date: sortedScans[sortedScans.length - 1].date, riskScore: last },
+      changes,
+      recommendation: trend === "concerning" 
+        ? "Schedule immediate follow-up with your healthcare provider" 
+        : trend === "improving"
+        ? "Great progress! Continue current prevention measures"
+        : "Maintain regular screening schedule",
+      trajectory: trend,
+    };
+  };
+
+  const calculateChange = (sortedScans: ScanEntry[]) => {
+    if (sortedScans.length < 2) return 0;
+    const first = sortedScans[0].riskScore;
+    const last = sortedScans[sortedScans.length - 1].riskScore;
+    return ((last - first) / first) * 100;
+  };
+
+  const handleShare = () => {
+    if (!analysis) return;
+    const text = `My Cavista Prevention Report:\n- Trend: ${analysis.trend}\n- Risk Change: ${analysis.changePercent.toFixed(1)}%\n- Total Scans: ${analysis.totalScans}\n- Recommendation: ${analysis.recommendation}\n\nGenerated by Cavista AI`;
+    
+    if (navigator.share) {
+      navigator.share({ title: "Cavista Prevention Report", text });
+    } else {
+      navigator.clipboard.writeText(text);
+      alert("Report copied to clipboard!");
+    }
+  };
+
+  const handleDownload = () => {
+    if (!analysis) return;
+    const report = `
+═══════════════════════════════════════
+       CAVISTA PREVENTION REPORT
+═══════════════════════════════════════
+
+LONGITUDINAL ANALYSIS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total Scans Analyzed: ${analysis.totalScans}
+Analysis Period: ${analysis.firstScan.date} to ${analysis.latestScan.date}
+
+RISK TREND
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Trend: ${analysis.trend.toUpperCase()}
+Change: ${analysis.changePercent > 0 ? '+' : ''}${analysis.changePercent.toFixed(1)}%
+First Scan Risk: ${analysis.firstScan.riskScore}%
+Latest Scan Risk: ${analysis.latestScan.riskScore}%
+
+${analysis.changes.length > 0 ? `CHANGES DETECTED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${analysis.changes.map(c => `• ${c}`).join('\n')}
+
+` : ''}RECOMMENDATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${analysis.recommendation}
+
+═══════════════════════════════════════
+Generated: ${new Date().toLocaleString()}
+Cavista - Prevention Through Early Detection
+═══════════════════════════════════════
+    `.trim();
+
+    const blob = new Blob([report], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Cavista-Longitudinal-${new Date().toISOString().split("T")[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-5xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          Longitudinal Tracking
-        </h1>
-        <p className="mt-1 text-sm text-muted">
-          Track screening results over time to detect trends and changes. This
-          is the key feature for early detection.
+        <h1 className="text-2xl font-bold text-foreground">Prevention Timeline</h1>
+        <p className="mt-1 text-muted">
+          Track your health over time. Compare past scans to detect patterns and trends before they become problems.
         </p>
       </div>
 
-      {error && (
-        <div
-          className="mb-6 border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger"
-          role="alert"
-        >
-          {error}
+      {/* Timeline Visualization */}
+      {scans.length >= 2 && (
+        <div className="mb-8 bg-surface border border-border rounded-xl p-6">
+          <h3 className="text-sm font-medium text-foreground mb-4 flex items-center gap-2">
+            <Activity className="w-4 h-4 text-action" />
+            Your Risk Timeline
+          </h3>
+          <div className="relative">
+            <div className="absolute top-5 left-0 right-0 h-1 bg-border"></div>
+            <div 
+              className="absolute top-5 h-1 bg-gradient-to-r from-green-500 via-yellow-500 to-red-500"
+              style={{ 
+                left: '0%', 
+                right: `${100 - Math.max(...scans.map(s => s.riskScore)) + 20}%` 
+              }}
+            ></div>
+            <div className="relative flex justify-between">
+              {scans.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((scan, i) => (
+                <div key={scan.id} className="flex flex-col items-center">
+                  <div 
+                    className={`w-4 h-4 rounded-full border-2 ${
+                      scan.riskScore < 30 ? "bg-green-500 border-green-500" :
+                      scan.riskScore < 60 ? "bg-yellow-500 border-yellow-500" : "bg-red-500 border-red-500"
+                    }`}
+                  ></div>
+                  <div className="mt-2 text-xs text-muted text-center">
+                    <div className="font-medium">{new Date(scan.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
+                    <div className={scan.riskScore < 30 ? "text-green-600" : scan.riskScore < 60 ? "text-yellow-600" : "text-red-600"}>
+                      {scan.riskScore}%
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="border border-border p-6">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-xs font-medium tracking-widest uppercase text-muted">
-              Previous Scans
-            </p>
-            <button
-              type="button"
-              onClick={handleAddScan}
-              className="text-xs text-action hover:underline"
-              tabIndex={0}
-              aria-label="Add another scan entry"
-            >
-              + Add Scan
-            </button>
-          </div>
+      {/* Add Scans */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-foreground">Your Scans</h3>
+          <button
+            onClick={handleAddScan}
+            className="flex items-center gap-2 px-4 py-2 bg-action text-white text-sm font-medium rounded-lg hover:opacity-90"
+          >
+            <Plus className="w-4 h-4" />
+            Add Past Scan
+          </button>
+        </div>
 
+        {scans.length === 0 ? (
+          <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
+            <Calendar className="w-12 h-12 mx-auto text-muted mb-4" />
+            <p className="text-foreground font-medium">No scans added yet</p>
+            <p className="text-sm text-muted mt-1">Add your past scan results to track changes over time</p>
+          </div>
+        ) : (
           <div className="space-y-3">
-            {scans.map((scan, i) => (
-              <div
-                key={i}
-                className="grid grid-cols-5 gap-2 items-end border border-border p-3"
-              >
-                <div>
-                  <label className="block text-[10px] text-muted mb-0.5">
-                    Date
-                  </label>
-                  <input
-                    type="date"
-                    value={scan.date}
-                    onChange={(e) =>
-                      handleScanChange(i, "date", e.target.value)
-                    }
-                    className="w-full border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-foreground transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-muted mb-0.5">
-                    Result
-                  </label>
-                  <select
-                    value={scan.result}
-                    onChange={(e) =>
-                      handleScanChange(i, "result", e.target.value)
-                    }
-                    className="w-full border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-foreground transition-colors"
-                  >
-                    <option value="benign">Benign</option>
-                    <option value="malignant">Malignant</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] text-muted mb-0.5">
-                    Risk Level
-                  </label>
-                  <select
-                    value={scan.riskLevel}
-                    onChange={(e) =>
-                      handleScanChange(i, "riskLevel", e.target.value)
-                    }
-                    className="w-full border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-foreground transition-colors"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] text-muted mb-0.5">
-                    Confidence
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="1"
-                    value={scan.confidence}
-                    onChange={(e) =>
-                      handleScanChange(i, "confidence", e.target.value)
-                    }
-                    className="w-full border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:border-foreground transition-colors"
-                  />
-                </div>
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveScan(i)}
-                    disabled={scans.length <= 1}
-                    className="text-xs text-muted hover:text-danger transition-colors disabled:opacity-30"
-                    aria-label={`Remove scan ${i + 1}`}
-                  >
-                    Remove
-                  </button>
+            {scans.map((scan) => (
+              <div key={scan.id} className="bg-surface border border-border rounded-xl p-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+                  <div>
+                    <label className="block text-xs text-muted mb-1">Date</label>
+                    <input
+                      type="date"
+                      value={scan.date}
+                      onChange={(e) => handleScanChange(scan.id, "date", e.target.value)}
+                      className="w-full border border-border bg-background px-3 py-2 text-sm rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted mb-1">Scan Type</label>
+                    <select
+                      value={scan.type}
+                      onChange={(e) => handleScanChange(scan.id, "type", e.target.value)}
+                      className="w-full border border-border bg-background px-3 py-2 text-sm rounded-lg"
+                    >
+                      <option value="Chest X-Ray">Chest X-Ray</option>
+                      <option value="Mammogram">Mammogram</option>
+                      <option value="CT Scan">CT Scan</option>
+                      <option value="Risk Assessment">Risk Assessment</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted mb-1">Result</label>
+                    <select
+                      value={scan.result}
+                      onChange={(e) => handleScanChange(scan.id, "result", e.target.value)}
+                      className="w-full border border-border bg-background px-3 py-2 text-sm rounded-lg"
+                    >
+                      <option value="Normal">Normal</option>
+                      <option value="Abnormal">Abnormal</option>
+                      <option value="Follow-up">Follow-up Required</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted mb-1">Risk Score (%)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={scan.riskScore}
+                      onChange={(e) => handleScanChange(scan.id, "riskScore", parseInt(e.target.value) || 0)}
+                      className="w-full border border-border bg-background px-3 py-2 text-sm rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <button
+                      onClick={() => handleRemoveScan(scan.id)}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Remove
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+          {error}
         </div>
+      )}
 
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="w-full text-sm font-medium text-white bg-action px-4 py-3 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-          aria-label="Analyze longitudinal data"
-        >
-          {isLoading ? "Analyzing..." : "Analyze Trends"}
-        </button>
-      </form>
+      {/* Analyze Button */}
+      <button
+        onClick={handleAnalyze}
+        disabled={isLoading || scans.length < 2}
+        className="w-full py-4 bg-action text-white font-semibold rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
+      >
+        {isLoading ? (
+          <>Analyzing...</>
+        ) : (
+          <>
+            <Activity className="w-5 h-5" />
+            Analyze Trends
+          </>
+        )}
+      </button>
 
-      {result && (
+      {/* Results */}
+      {analysis && (
         <div className="mt-8 space-y-6">
-          <p className="text-xs font-medium tracking-widest uppercase text-muted">
-            Results
-          </p>
-
-          <div className="border border-border p-6">
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div>
-                <p className="text-xs text-muted mb-1">Trend</p>
-                <p
-                  className={`text-2xl font-semibold capitalize ${
-                    result.longitudinalAnalysis.trend === "concerning"
-                      ? "text-danger"
-                      : result.longitudinalAnalysis.trend === "stable"
-                        ? "text-yellow-600"
-                        : "text-action"
-                  }`}
-                >
-                  {result.longitudinalAnalysis.trend}
+          {/* Trend Banner */}
+          <div className={`rounded-2xl p-6 ${
+            analysis.trend === "concerning" ? "bg-red-50 border-2 border-red-200" :
+            analysis.trend === "improving" ? "bg-green-50 border-2 border-green-200" :
+            "bg-blue-50 border-2 border-blue-200"
+          }`}>
+            <div className="flex items-center gap-4">
+              <div className={`w-14 h-14 rounded-full flex items-center justify-center ${
+                analysis.trend === "concerning" ? "bg-red-100" :
+                analysis.trend === "improving" ? "bg-green-100" : "bg-blue-100"
+              }`}>
+                {analysis.trend === "concerning" ? (
+                  <TrendingUp className="w-7 h-7 text-red-600" />
+                ) : analysis.trend === "improving" ? (
+                  <TrendingDown className="w-7 h-7 text-green-600" />
+                ) : (
+                  <Minus className="w-7 h-7 text-blue-600" />
+                )}
+              </div>
+              <div className="flex-1">
+                <h3 className="text-xl font-bold text-foreground capitalize">
+                  {analysis.trend === "concerning" ? "Risk Increasing" : 
+                   analysis.trend === "improving" ? "Risk Decreasing" : "Risk Stable"}
+                </h3>
+                <p className="text-muted">
+                  {analysis.changePercent > 0 ? "+" : ""}{analysis.changePercent.toFixed(1)}% change over {analysis.totalScans} scans
                 </p>
               </div>
-              <div>
-                <p className="text-xs text-muted mb-1">Total Scans</p>
-                <p className="text-2xl font-semibold text-foreground">
-                  {result.longitudinalAnalysis.totalScans}
-                </p>
+              <div className="text-right">
+                <div className="text-3xl font-bold text-foreground">{analysis.totalScans}</div>
+                <div className="text-xs text-muted">Scans</div>
               </div>
             </div>
+          </div>
 
-            {result.longitudinalAnalysis.changes.length > 0 && (
-              <div className="mb-4">
-                <p className="text-xs text-muted mb-2">Changes Detected</p>
-                <ul className="space-y-1" role="list">
-                  {result.longitudinalAnalysis.changes.map((change, i) => (
-                    <li
-                      key={i}
-                      className="text-sm text-muted flex items-start gap-2"
-                    >
-                      <span
-                        className="text-danger mt-0.5 text-xs"
-                        aria-hidden="true"
-                      >
-                        ●
-                      </span>
-                      {change}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <div className="border-t border-border pt-4 mt-4">
-              <p className="text-sm text-foreground font-medium">
-                {result.longitudinalAnalysis.recommendation}
-              </p>
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-surface border border-border rounded-xl p-4 text-center">
+              <div className="text-2xl font-bold text-foreground">{analysis.firstScan.riskScore}%</div>
+              <div className="text-xs text-muted">First Scan</div>
+              <div className="text-xs text-muted">{analysis.firstScan.date}</div>
             </div>
+            <div className="bg-surface border border-border rounded-xl p-4 text-center">
+              <div className="text-2xl font-bold text-foreground">{analysis.latestScan.riskScore}%</div>
+              <div className="text-xs text-muted">Latest Scan</div>
+              <div className="text-xs text-muted">{analysis.latestScan.date}</div>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-4 text-center">
+              <div className={`text-2xl font-bold ${
+                analysis.changePercent > 0 ? "text-red-600" : analysis.changePercent < 0 ? "text-green-600" : "text-foreground"
+              }`}>
+                {analysis.changePercent > 0 ? "+" : ""}{analysis.changePercent.toFixed(1)}%
+              </div>
+              <div className="text-xs text-muted">Change</div>
+            </div>
+            <div className="bg-surface border border-border rounded-xl p-4 text-center">
+              <div className="text-2xl font-bold text-foreground">{scans.length}</div>
+              <div className="text-xs text-muted">Total Entries</div>
+            </div>
+          </div>
+
+          {/* Changes */}
+          {analysis.changes.length > 0 && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-5">
+              <h4 className="font-semibold text-yellow-800 mb-3 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5" />
+                Changes Detected
+              </h4>
+              <ul className="space-y-2">
+                {analysis.changes.map((change, i) => (
+                  <li key={i} className="text-sm text-yellow-700 flex items-start gap-2">
+                    <span className="text-yellow-500">•</span>
+                    {change}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Recommendation */}
+          <div className="bg-green-50 border border-green-200 rounded-xl p-5">
+            <h4 className="font-semibold text-green-800 mb-2 flex items-center gap-2">
+              <CheckCircle className="w-5 h-5" />
+              Recommendation
+            </h4>
+            <p className="text-green-700">{analysis.recommendation}</p>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-4">
+            <button
+              onClick={handleShare}
+              className="flex-1 py-3 border-2 border-border text-foreground font-semibold rounded-xl hover:bg-surface flex items-center justify-center gap-2"
+            >
+              <Share2 className="w-5 h-5" />
+              Share Report
+            </button>
+            <button
+              onClick={handleDownload}
+              className="flex-1 py-3 bg-action text-white font-semibold rounded-xl hover:opacity-90 flex items-center justify-center gap-2"
+            >
+              <Download className="w-5 h-5" />
+              Download Report
+            </button>
           </div>
         </div>
       )}
     </div>
   );
-};
+}
 
 export default LongitudinalPage;

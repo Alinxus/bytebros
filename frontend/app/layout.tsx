@@ -1,20 +1,15 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "Beta - Breast Evaluation and Tumor analysis",
-  description: "AI-powered 5-year breast cancer risk predictions using X-ray longitudinal analysis, genetic markers, lifestyle factors, and family history. Not just detection — prevention.",
+  title: "Cavista - Prevention Through Early Detection",
+  description: "AI-powered cancer prevention platform. Catch cancer before it starts through early detection and risk assessment.",
 };
 
 export default function RootLayout({
@@ -25,7 +20,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${inter.variable} font-sans antialiased`}
       >
         {children}
       </body>

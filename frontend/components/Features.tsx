@@ -2,40 +2,40 @@
 /*
 |--------------------------------------------------------------
 | Features Data
-|-------------------------------------------------------------
+|--------------------------------------------------------------
 */
 const FEATURES = [
   {
-    title: "X-Ray Analysis Engine",
+    title: "Know Your Risk",
     description:
-      "Upload X-ray images for AI-powered abnormality detection. Identify nodules, masses, and classify severity with OpenAI Vision.",
+      "Understand your personal cancer risk before it becomes a problem. We analyze family history, genetics, and lifestyle to identify your risk factors early.",
     details: [
-      "Accept URL or base64 images",
-      "Detect abnormalities & nodules",
-      "Classify severity levels",
-      "Identify cancer type indicators",
+      "Family health history analysis",
+      "Genetic marker screening (BRCA, etc.)",
+      "Lifestyle risk factors",
+      "Personalized prevention plan",
     ],
   },
   {
-    title: "Risk Prediction Engine",
+    title: "Early Detection",
     description:
-      "ML-based diagnosis using clinical features, genetic markers, and lifestyle factors for comprehensive risk scoring.",
+      "Our AI analyzes your X-rays and mammograms to detect abnormalities years before they become serious. Early detection = easier treatment.",
     details: [
-      "Wisconsin dataset classification",
-      "Genetic marker analysis (BRCA1/2)",
-      "Lifestyle factor assessment",
-      "Confidence scoring",
+      "Chest X-ray analysis",
+      "Mammogram screening",
+      "Pattern recognition AI",
+      "Second opinion verification",
     ],
   },
   {
-    title: "Longitudinal Tracking",
+    title: "Prevention Tracking",
     description:
-      "Track X-ray results and clinical data over time to detect progression patterns and predict trajectory.",
+      "Monitor your health over time. Track changes, see how lifestyle changes affect your risk, and catch problems before they develop.",
     details: [
-      "Compare scans over years",
-      "Detect progression patterns",
-      "Predict trajectory trends",
-      "5-year & 10-year risk forecasts",
+      "Longitudinal comparison",
+      "Risk trend analysis",
+      "Progress tracking",
+      "Actionable insights",
     ],
   },
 ] as const;
@@ -44,7 +44,7 @@ const FEATURES = [
 /*
 |--------------------------------------------------------------
 | Features Component
-|-------------------------------------------------------------
+|--------------------------------------------------------------
 */
 
 function Features() {
@@ -53,38 +53,44 @@ function Features() {
       id="features"
       className="border-b border-border">
       <div className="mx-auto max-w-6xl px-6 py-20">
-        <div className="mb-12">
-          <p className="text-xs font-medium tracking-widest uppercase text-muted mb-2">
-            Capabilities
+        <div className="mb-12 text-center">
+          <p className="text-xs font-medium tracking-widest uppercase text-action mb-2">
+            Our Approach
           </p>
           <h2
             id="features-heading"
-            className="text-3xl font-semibold tracking-tight text-foreground"
+            className="text-3xl md:text-4xl font-bold tracking-tight text-foreground"
           >
-            Three Prediction Pillars
+            From Detection to Prevention
           </h2>
+          <p className="mt-4 text-muted max-w-2xl mx-auto">
+            We don't just find cancer — we help you prevent it. Our AI-powered platform 
+            identifies risks early so you can take action before cancer develops.
+          </p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-0 border border-border divide-y md:divide-y-0 md:divide-x divide-border">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {FEATURES.map((feature) => (
-            <div key={feature.title} className="p-6">
-              <h3 className="text-base font-semibold text-foreground mb-2">
+            <div key={feature.title} className="p-8 bg-surface border border-border rounded-xl hover:border-action/50 transition-colors">
+              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-semibold text-foreground mb-3">
                 {feature.title}
               </h3>
-              <p className="text-sm text-muted leading-relaxed mb-4">
+              <p className="text-muted leading-relaxed mb-4">
                 {feature.description}
               </p>
               <ul className="space-y-2" role="list">
                 {feature.details.map((detail) => (
                   <li
                     key={detail}
-                    className="text-sm text-muted flex items-start gap-2"
+                    className="text-sm text-muted flex items-center gap-2"
                   >
-                    <span
-                      className="text-action mt-0.5 text-xs"
-                      aria-hidden="true"
-                    >
-                      &#x2022;
-                    </span>
+                    <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
+                    </svg>
                     {detail}
                   </li>
                 ))}

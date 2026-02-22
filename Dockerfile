@@ -45,4 +45,4 @@ ENV PYTHONUNBUFFERED=1
 EXPOSE 3000 5000 5001 5002
 
 # Start all services
-CMD sh -c "cd /app/ml-model && python app.py & python breast-cancer-service.py & python mammography-service.py & cd /app && npm run dev"
+CMD sh -c "cd /app/ml-model && python app.py & python breast-cancer-service.py & cd /app && npm run dev"

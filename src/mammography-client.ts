@@ -1,4 +1,4 @@
-const MAMMOGRAPHY_SERVICE_URL = process.env.MAMMOGRAPHY_SERVICE_URL || "http://localhost:5002";
+const MAMMOGRAPHY_SERVICE_URL = process.env.MAMMOGRAPHY_SERVICE_URL || "http://localhost:5000";
 
 interface MammographyResult {
   prediction: "benign" | "malignant";
@@ -14,7 +14,7 @@ interface MammographyResult {
 
 export async function analyzeMammography(imageBase64: string): Promise<MammographyResult> {
   try {
-    const response = await fetch(`${MAMMOGRAPHY_SERVICE_URL}/analyze`, {
+    const response = await fetch(`${MAMMOGRAPHY_SERVICE_URL}/mammography/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ image: imageBase64 }),

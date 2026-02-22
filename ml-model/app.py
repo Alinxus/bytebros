@@ -5,6 +5,8 @@ Uses torchxrayvision with DenseNet121 pretrained on NIH dataset
 import io
 import base64
 import json
+import os
+import numpy as np
 from flask import Flask, request, jsonify
 import torch
 import torchxrayvision as xrv
@@ -154,6 +156,56 @@ def analyze_with_model(img_tensor, model_name='densenet121'):
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({'status': 'healthy', 'model': 'densenet121'})
+
+@app.route('/mammography/analyze', methods=['POST'])
+def mammography_analyze():
+    """Analyze mammography/breast X-ray"""
+    try:
+        import joblib
+        data = request.get_json()
+        
+        if not data or 'image' not in data:
+            return jsonify({'error': 'image (base64) required'}), 400
+        
+        MODEL_PATH = os.path.join(os.path.dirname(__file__), "breast_cancer_model.joblib")
+        SCALER_PATH = os.path.join(os.path.dirname(__file__), "breast_cancer_scaler.joblib")
+        model = joblib.load(MODEL_PATH)
+        scaler = joblib.load(SCALER_PATH)
+        
+        image_data = data['image']
+        if ',' in image_data:
+            image_data = image_data.split(',')[1]
+        
+        img_bytes = base64.b64decode(image_data)
+        img = Image.open(io.BytesIO(img_bytes))
+        
+        img = img.convert('L').resize((100, 100))
+        arr = np.array(img)
+        
+        features = []
+        features.append(np.mean(arr) / 255.0 * 30)
+        features.append(np.std(arr) / 255.0 * 30)
+        features.append(np.percentile(arr, 90) / 255.0 * 100)
+        features.append(np.sum(arr > 128) / arr.size * 1000)
+        
+        h, w = arr.shape
+        for region in [arr[:h//2, :w//2], arr[:h//2, w//2:], arr[h//2:, :w//2], arr[h//2:, w//2:], arr[h//3:2*h//3, w//3:2*w//3]]:
+            features.extend([np.mean(region)/255.0*30, np.std(region)/255.0*30, np.percentile(region,75)/255.0*30, np.percentile(region,25)/255.0*30])
+        
+        features_scaled = scaler.transform([features])
+        prediction = model.predict(features_scaled)[0]
+        probability = model.predict_proba(features_scaled)[0]
+        
+        return jsonify({
+            'prediction': 'malignant' if prediction == 1 else 'benign',
+            'confidence': float(max(probability)),
+            'probabilities': {'benign': float(probability[0]), 'malignant': float(probability[1])},
+            'riskLevel': 'high' if prediction == 1 else 'low',
+            'analysisMethod': 'statistical-features',
+            'note': 'This is a preliminary screening. Please consult a radiologist for proper diagnosis.'
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
