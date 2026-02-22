@@ -527,11 +527,6 @@ cancer.post(
     const body = c.req.valid("json");
     const userId = c.get("userId");
 
-    const mlHealthy = await checkMammographyServiceHealth();
-    if (!mlHealthy) {
-      return c.json({ error: "Mammography service unavailable. Make sure ML service runs on port 5002." }, 503);
-    }
-
     if (!body.imageBase64 && !body.imageUrl) {
       return c.json({ error: "imageBase64 or imageUrl required" }, 400);
     }
