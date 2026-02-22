@@ -93,14 +93,27 @@ def analyze_with_model(img_tensor, model_name='densenet121'):
     
     with torch.no_grad():
         output = model(img_tensor)
-        
+    
+    # Get the actual number of classes from model output
+    num_classes = output.shape[1]
+    print(f"[DEBUG] Model output classes: {num_classes}")
+    
     # Get probabilities
     probs = torch.sigmoid(output).squeeze().numpy()
     
-    # Build results
+    # xrv pathologies - these are the standard 18 pathologies
+    xrv_pathologies = [
+        'Atelectasis', 'Consolidation', 'Infiltration', 'Pneumothorax', 'Edema',
+        'Emphysema', 'Fibrosis', 'Effusion', 'Pneumonia', 'Pleural_Thickening',
+        'Cardiomegaly', 'Lung Lesion', 'Fracture', 'Lung Opacity', 'Support Devices',
+        'Nodule', 'Mass', 'Hernia'
+    ]
+    
+    # Build results - only for available outputs
     results = []
-    for i, pathology in enumerate(PATHOLOGIES):
+    for i in range(min(len(probs), len(xrv_pathologies))):
         prob = float(probs[i])
+        pathology = xrv_pathologies[i]
         results.append({
             'pathology': pathology,
             'probability': round(prob * 100, 2),
@@ -170,6 +183,9 @@ def analyze():
         })
         
     except Exception as e:
+        import traceback
+        print(f"[ERROR] Analyze failed: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({
             'success': False,
             'error': str(e)
