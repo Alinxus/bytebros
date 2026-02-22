@@ -1,4 +1,4 @@
-const MAMMOGRAPHY_SERVICE_URL = process.env.MAMMOGRAPHY_SERVICE_URL || "http://localhost:5000";
+const MAMMOGRAPHY_SERVICE_URL = process.env.ML_SERVICE_URL || "https://ml-model.fly.dev";
 
 interface MammographyResult {
   prediction: "benign" | "malignant";

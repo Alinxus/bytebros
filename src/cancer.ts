@@ -901,7 +901,7 @@ cancer.post(
             : ["Continue self-examination", "Schedule next screening in 1 year"];
         }
       } else {
-        const mlHealthy = await fetch("http://localhost:5000/health").then(r => r.ok).catch(() => false);
+        const mlHealthy = await fetch("https://ml-model.fly.dev/health").then(r => r.ok).catch(() => false);
         
         if (mlHealthy) {
           const analysis = await analyzeXRay(imageData);
