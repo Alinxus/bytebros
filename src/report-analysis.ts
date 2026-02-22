@@ -231,17 +231,31 @@ report.post(
       
       // Handle different file types
       if (fileName.endsWith(".pdf")) {
-        // For PDF, we'll try to extract text using pdf-parse or return a message
-        // Since we don't have pdf-parse installed, we'll use a simple approach
-        extractedText = `[PDF Document: ${file.name}]\n\nNote: Full PDF text extraction requires additional processing. Please copy and paste the text content from your PDF for analysis, or contact support for PDF processing.`;
+        // Import pdf-parse dynamically
+        const pdfParseModule = await import("pdf-parse");
+        // Handle different export styles
+        const pdfParse = (pdfParseModule as any).default || (pdfParseModule as any);
+        const pdfBuffer = Buffer.from(fileBuffer);
         
-        // If OpenAI API is available, we can try using GPT-4 with vision for embedded images
-        // For now, return a message asking for text
-        return c.json({
-          success: false,
-          error: "PDF processing requires text extraction. Please copy the text from your PDF and paste it into the text field, or convert your report to an image.",
-          requiresTextInput: true
-        }, 400);
+        try {
+          const pdfData = await pdfParse(pdfBuffer);
+          extractedText = pdfData.text;
+          
+          if (!extractedText || extractedText.length < 20) {
+            return c.json({
+              success: false,
+              error: "Could not extract text from PDF. Please copy the text manually or convert to image.",
+              requiresTextInput: true
+            }, 400);
+          }
+        } catch (pdfErr) {
+          console.error("[PDF Parse Error]", pdfErr);
+          return c.json({
+            success: false,
+            error: "Failed to parse PDF. Please paste the text content directly.",
+            requiresTextInput: true
+          }, 400);
+        }
         
       } else if (fileName.endsWith(".txt")) {
         // Text files
