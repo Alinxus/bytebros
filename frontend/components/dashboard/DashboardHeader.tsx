@@ -23,7 +23,7 @@ function DashboardHeader() {
 |-------------------------------------------------------------
 */
     const handleLogout = () => {
-        localStorage.removeItem("cavista_token");
+        localStorage.removeItem("cavista_api_key");
         router.push("/login");
     };
 

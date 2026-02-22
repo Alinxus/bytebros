@@ -10,25 +10,25 @@ const DashboardLayout = ({
 }: Readonly<{
     children: React.ReactNode;
 }>) => {
-    // const router = useRouter();
-    // const [isAuthed, setIsAuthed] = useState(false);
+    const router = useRouter();
+    const [isAuthed, setIsAuthed] = useState(false);
 
-    // useEffect(() => {
-    //     const token = localStorage.getItem("cavista_token");
-    //     if (!token) {
-    //         router.push("/login");
-    //         return;
-    //     }
-    //     setIsAuthed(true);
-    // }, [router]);
+    useEffect(() => {
+        const token = localStorage.getItem("cavista_api_key");
+        if (!token) {
+            router.push("/login");
+            return;
+        }
+        setIsAuthed(true);
+    }, [router]);
 
-    // if (!isAuthed) {
-    //     return (
-    //         <div className="min-h-screen bg-background flex items-center justify-center">
-    //             <p className="text-sm text-muted">Loading...</p>
-    //         </div>
-    //     );
-    // }
+    if (!isAuthed) {
+        return (
+            <div className="min-h-screen bg-background flex items-center justify-center">
+                <p className="text-sm text-muted">Loading...</p>
+            </div>
+        );
+    }
 
     return (
         <div className="flex min-h-screen bg-background">

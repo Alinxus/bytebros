@@ -79,7 +79,7 @@ function LoginPage() {
                 return;
             }
 
-            localStorage.setItem("cavista_token", data.apiKey);
+            localStorage.setItem("cavista_api_key", data.apiKey);
             router.push("/dashboard");
         } catch {
             setError("Network error. Please try again.");

@@ -73,7 +73,8 @@ const SignupPage = () => {
                 return;
             }
 
-            router.push("/login");
+            localStorage.setItem("cavista_api_key", data.apiKey);
+            router.push("/dashboard");
         } catch {
             setError("Network error. Please try again.");
         } finally {
