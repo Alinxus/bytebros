@@ -224,34 +224,15 @@ def health():
 def mammography_analyze():
     """Analyze mammography/breast X-ray using DenseNet121"""
     try:
-        import numpy as np
         data = request.get_json()
         
         if not data or 'image' not in data:
             return jsonify({'error': 'image (base64) required'}), 400
         
         print("[MAMMOGRAPHY] Processing image with DenseNet121")
-        
-        # Use same image processing as chest X-ray
         image_data = data['image']
-        if ',' in image_data:
-            image_data = image_data.split(',')[1]
-        
-        img_bytes = base64.b64decode(image_data)
-        img = Image.open(io.BytesIO(img_bytes)).convert('L')
-        img = img.resize((224, 224), Image.Resampling.LANCZOS)
-        
-        img_np_gray = np.array(img).astype(np.float32) / 255.0
-        img_np = xrv.utils.normalize(img_np_gray, maxval=1.0)
-
-        if len(img_np.shape) == 2:
-            img_np = np.stack([img_np] * 3, axis=0)
-        else:
-            img_np = img_np.transpose(2, 0, 1)
-
-        img_tensor = torch.from_numpy(img_np).float().unsqueeze(0)
-        quality_tensor = torch.from_numpy(img_np_gray).float().unsqueeze(0).unsqueeze(0)
-        quality = assess_image_quality(quality_tensor)
+        img_tensor = process_image(image_data, target_size=224)
+        quality = assess_image_quality(img_tensor)
         
         # Use the same DenseNet121 model
         results = analyze_with_model(img_tensor, 'densenet121')

@@ -25,6 +25,7 @@ type MammoResult = {
     probabilities: { benign: number; malignant: number };
     riskLevel: string;
   };
+  auditId?: string;
 };
 
 const fileToBase64 = (file: File): Promise<string> =>
@@ -46,6 +47,8 @@ const MammographyPage = () => {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<MammoResult | null>(null);
+  const [auditDetails, setAuditDetails] = useState<any | null>(null);
+  const [auditError, setAuditError] = useState("");
 
 /*
 |-------------------------------------------------------------
@@ -101,6 +104,25 @@ const MammographyPage = () => {
       setError("Network error. Please try again.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleFetchAudit = async (id: string) => {
+    setAuditError("");
+    setAuditDetails(null);
+    try {
+      const apiKey = localStorage.getItem("cavista_api_key") || "";
+      const res = await fetch(`/api/screening/audit/${id}`, {
+        headers: { "x-api-key": apiKey },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuditError(data.error || "Unable to load audit trail.");
+        return;
+      }
+      setAuditDetails(data);
+    } catch {
+      setAuditError("Unable to load audit trail.");
     }
   };
 
@@ -289,6 +311,29 @@ const MammographyPage = () => {
               </div>
             </div>
           </div>
+
+          {result.auditId && (
+            <div className="border border-border p-4">
+              <div className="text-xs text-muted">Audit Trail</div>
+              <div className="text-xs text-foreground flex items-center gap-2">
+                <span>Audit ID: {result.auditId}</span>
+                <button
+                  onClick={() => handleFetchAudit(result.auditId!)}
+                  className="text-xs text-action hover:underline"
+                >
+                  View
+                </button>
+              </div>
+              {auditError && (
+                <div className="text-xs text-red-600 mt-2">{auditError}</div>
+              )}
+              {auditDetails && (
+                <pre className="text-xs mt-3 bg-background border border-border rounded-lg p-3 overflow-auto">
+{JSON.stringify(auditDetails, null, 2)}
+                </pre>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

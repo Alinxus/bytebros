@@ -7,30 +7,68 @@ import { predictCancer, predictFromXRay, type PatientFeatures, type RiskFactors,
 import { calculateCancerRisk, type PatientRiskFactors, type XRayAnalysisResult, type LongitudinalScan } from "./cancer-risk-models.js";
 import { predictBreastCancer, checkBreastCancerServiceHealth, BREAST_CANCER_FEATURES } from "./breast-cancer-client.js";
 import { analyzeMammography, checkMammographyServiceHealth } from "./mammography-client.js";
+import crypto from "crypto";
 
 const cancer = new Hono();
+
+const applyQualityPenalty = (confidence: number, quality?: { quality: string; issues?: string[] }) => {
+  if (!quality || quality.quality !== "poor") return confidence;
+  return Math.max(0, Math.min(1, confidence * 0.7));
+};
+
+const hashString = (value: string) =>
+  crypto.createHash("sha256").update(value).digest("hex");
+
+const createAuditLog = async (params: {
+  userId?: string;
+  apiKeyId?: string;
+  endpoint: string;
+  method: string;
+  statusCode: number;
+  requestBody?: any;
+  responseBody?: any;
+  errorMessage?: string;
+}) => {
+  try {
+    const audit = await prisma.auditLog.create({
+      data: {
+        userId: params.userId || null,
+        apiKeyId: params.apiKeyId || null,
+        endpoint: params.endpoint,
+        method: params.method,
+        statusCode: params.statusCode,
+        requestBody: params.requestBody || undefined,
+        responseBody: params.responseBody || undefined,
+        errorMessage: params.errorMessage || undefined,
+      },
+    });
+    return audit.id;
+  } catch (err) {
+    console.log("[Audit] Failed to write audit log", err);
+    return null;
+  }
+};
 
 async function authenticate(c: any) {
   const apiKey = c.req.header("x-api-key");
   if (!apiKey) return null;
 
-  const keyHash = await import("crypto").then(crypto => 
-    crypto.createHash("sha256").update(apiKey).digest("hex")
-  );
+  const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
   
   const key = await prisma.apiKey.findFirst({
     where: { keyHash, isActive: true },
   });
 
-  return key?.userId || null;
+  return key ? { userId: key.userId, apiKeyId: key.id } : null;
 }
 
 cancer.use("*", async (c, next) => {
-  const userId = await authenticate(c);
-  if (!userId) {
+  const auth = await authenticate(c);
+  if (!auth) {
     return c.json({ error: "Unauthorized - provide x-api-key header" }, 401);
   }
-  (c as any).set("userId", userId);
+  (c as any).set("userId", auth.userId);
+  (c as any).set("apiKeyId", auth.apiKeyId);
   await next();
 });
 
@@ -212,6 +250,9 @@ cancer.post(
   })),
   async (c) => {
     const body = c.req.valid("json");
+    const userId = c.get("userId");
+    const apiKeyId = c.get("apiKeyId");
+    const apiKeyId = c.get("apiKeyId");
 
     if (!body.imageUrl && !body.imageBase64) {
       return c.json({ error: "imageUrl or imageBase64 required" }, 400);
@@ -231,14 +272,48 @@ cancer.post(
       riskAssessment = prediction.riskAssessment;
     }
 
-    return c.json({
+    const responseBody = {
       analysis: result,
+      riskScore: result.riskScore,
+      quality: result.quality,
+      adjustedConfidence: applyQualityPenalty(result.confidence, result.quality),
       riskAssessment,
       recommendation: result.riskLevel === "high"
         ? "High risk - immediate medical consultation recommended"
         : result.riskLevel === "medium"
         ? "Abnormal findings - follow-up recommended"
         : "No significant abnormalities - continue routine screening",
+    };
+
+    const requestMeta = {
+      imageHash: body.imageBase64
+        ? hashString(body.imageBase64.slice(0, 256))
+        : body.imageUrl
+        ? hashString(body.imageUrl)
+        : undefined,
+      imageBytes: body.imageBase64 ? body.imageBase64.length : undefined,
+      patientData: body.patientData || undefined,
+    };
+
+    const auditId = await createAuditLog({
+      userId,
+      apiKeyId,
+      endpoint: "/screening/xray",
+      method: "POST",
+      statusCode: 200,
+      requestBody: requestMeta,
+      responseBody: {
+        riskLevel: result.riskLevel,
+        riskScore: result.riskScore,
+        adjustedConfidence: responseBody.adjustedConfidence,
+        quality: result.quality,
+        model: result.model,
+      },
+    });
+
+    return c.json({
+      ...responseBody,
+      auditId,
     });
   }
 );
@@ -400,6 +475,170 @@ cancer.get("/guidelines/:type", async (c) => {
   return c.json(guidelines[type] || { error: "Unknown cancer type" }, guidelines[type] ? 200 : 404);
 });
 
+cancer.get("/model-card", async (c) => {
+  return c.json({
+    timestamp: new Date().toISOString(),
+    models: [
+      {
+        name: "DenseNet121 (torchxrayvision)",
+        task: "Chest X-ray multi-label classification",
+        training: "NIH ChestX-ray14 (pretrained)",
+        outputs: ["Atelectasis", "Consolidation", "Infiltration", "Pneumothorax", "Edema", "Emphysema", "Fibrosis", "Effusion", "Pneumonia", "Pleural_Thickening", "Cardiomegaly", "Lung Lesion", "Fracture", "Lung Opacity", "Support Devices", "Nodule", "Mass", "Hernia"],
+        limitations: [
+          "Screening assistance only",
+          "Performance depends on image quality",
+          "Not a replacement for radiologist interpretation"
+        ],
+        qualityChecks: ["exposure", "low_contrast", "blurry"]
+      },
+      {
+        name: "DenseNet121 (transfer learning)",
+        task: "Mammography screening (prototype)",
+        training: "Pretrained on chest X-ray dataset; used as proxy for demo",
+        limitations: [
+          "Prototype-level mammography analysis",
+          "Requires clinical validation",
+          "Not diagnostic"
+        ],
+        qualityChecks: ["exposure", "low_contrast", "blurry"]
+      }
+    ],
+    disclaimer: "Model cards are for transparency and educational use. This system is not a medical device."
+  });
+});
+
+cancer.post(
+  "/consensus",
+  zValidator("json", z.object({
+    xray: z.object({
+      riskScore: z.number().optional(),
+      riskLevel: z.enum(["low", "medium", "high"]).optional(),
+      confidence: z.number().optional(),
+      quality: z.object({
+        quality: z.enum(["good", "poor", "unknown"]).optional(),
+        issues: z.array(z.string()).optional(),
+      }).optional(),
+    }).optional(),
+    mammography: z.object({
+      riskScore: z.number().optional(),
+      riskLevel: z.enum(["low", "medium", "high"]).optional(),
+      confidence: z.number().optional(),
+      quality: z.object({
+        quality: z.enum(["good", "poor", "unknown"]).optional(),
+        issues: z.array(z.string()).optional(),
+      }).optional(),
+    }).optional(),
+    riskAssessment: z.object({
+      overallRisk: z.number().optional(),
+      riskLevel: z.enum(["low", "medium", "high", "very_high"]).optional(),
+    }).optional(),
+    longitudinal: z.object({
+      trend: z.enum(["improving", "stable", "concerning"]).optional(),
+      changePercent: z.number().optional(),
+    }).optional(),
+  })),
+  async (c) => {
+    const body = c.req.valid("json");
+    const userId = c.get("userId");
+    const apiKeyId = c.get("apiKeyId");
+
+    const toScore = (riskLevel?: string) => {
+      if (riskLevel === "high" || riskLevel === "very_high") return 80;
+      if (riskLevel === "medium") return 50;
+      return 20;
+    };
+
+    const inputs: Array<{ label: string; score: number; weight: number }> = [];
+    const addInput = (label: string, score: number, weight: number) => {
+      inputs.push({ label, score, weight });
+    };
+
+    if (body.xray) {
+      const score = body.xray.riskScore ?? toScore(body.xray.riskLevel);
+      const conf = body.xray.confidence ?? 0.7;
+      const weight = body.xray.quality?.quality === "poor" ? 0.4 : Math.min(1, Math.max(0.4, conf));
+      addInput("X-ray", score, weight);
+    }
+
+    if (body.mammography) {
+      const score = body.mammography.riskScore ?? toScore(body.mammography.riskLevel);
+      const conf = body.mammography.confidence ?? 0.7;
+      const weight = body.mammography.quality?.quality === "poor" ? 0.4 : Math.min(1, Math.max(0.4, conf));
+      addInput("Mammography", score, weight);
+    }
+
+    if (body.riskAssessment) {
+      const score = body.riskAssessment.overallRisk ?? toScore(body.riskAssessment.riskLevel);
+      addInput("Risk Profile", score, 0.9);
+    }
+
+    if (body.longitudinal) {
+      const trendScore = body.longitudinal.trend === "concerning" ? 70
+        : body.longitudinal.trend === "improving" ? 30
+        : 45;
+      addInput("Longitudinal Trend", trendScore, 0.6);
+    }
+
+    const totalWeight = inputs.reduce((acc, i) => acc + i.weight, 0) || 1;
+    const score = Math.round(inputs.reduce((acc, i) => acc + i.score * i.weight, 0) / totalWeight);
+    const riskLevel = score >= 70 ? "high" : score >= 40 ? "medium" : "low";
+
+    const agreement = inputs.length > 0
+      ? Math.round((inputs.filter(i => (i.score >= 70 ? "high" : i.score >= 40 ? "medium" : "low") === riskLevel).length / inputs.length) * 100)
+      : 0;
+
+    const recommendation = riskLevel === "high"
+      ? "Immediate follow-up recommended based on consensus risk"
+      : riskLevel === "medium"
+      ? "Follow-up recommended; monitor changes"
+      : "Continue routine screening schedule";
+
+    const responseBody = {
+      score,
+      riskLevel,
+      agreement,
+      inputs,
+      recommendation,
+    };
+
+    const auditId = await createAuditLog({
+      userId,
+      apiKeyId,
+      endpoint: "/screening/consensus",
+      method: "POST",
+      statusCode: 200,
+      requestBody: body,
+      responseBody,
+    });
+
+    return c.json({ ...responseBody, auditId });
+  }
+);
+
+cancer.get("/audit/:id", async (c) => {
+  const id = c.req.param("id");
+  const userId = c.get("userId");
+
+  const audit = await prisma.auditLog.findFirst({
+    where: { id, userId },
+  });
+
+  if (!audit) {
+    return c.json({ error: "Audit record not found" }, 404);
+  }
+
+  return c.json({
+    id: audit.id,
+    endpoint: audit.endpoint,
+    method: audit.method,
+    statusCode: audit.statusCode,
+    requestBody: audit.requestBody,
+    responseBody: audit.responseBody,
+    errorMessage: audit.errorMessage,
+    createdAt: audit.createdAt,
+  });
+});
+
 cancer.post(
   "/risk-predict",
   zValidator("json", z.object({
@@ -533,6 +772,8 @@ cancer.post(
 
     try {
       const result = await analyzeMammography(body.imageBase64 || body.imageUrl!);
+      const baseConfidence = result.calibratedConfidence ?? result.confidence;
+      const adjustedConfidence = applyQualityPenalty(baseConfidence, result.quality);
 
       try {
         await prisma.xrayAnalysis.create({
@@ -541,7 +782,7 @@ cancer.post(
             imageType: "mammography",
             hasAbnormality: result.prediction === "malignant",
             riskLevel: result.riskLevel,
-            confidence: result.confidence,
+            confidence: adjustedConfidence,
             findings: JSON.stringify(result),
           },
         });
@@ -549,11 +790,45 @@ cancer.post(
         console.log("[DB] Warning: Failed to save", e);
       }
 
-      return c.json({
+      const responseBody = {
         timestamp: new Date().toISOString(),
         analysis: result,
+        riskScore: result.riskScore,
+        quality: result.quality,
+        adjustedConfidence,
         patientData: body.patientData,
         disclaimer: "This is a screening assist tool, not a medical diagnosis. Consult a radiologist.",
+      };
+
+      const requestMeta = {
+        imageHash: body.imageBase64
+          ? hashString(body.imageBase64.slice(0, 256))
+          : body.imageUrl
+          ? hashString(body.imageUrl)
+          : undefined,
+        imageBytes: body.imageBase64 ? body.imageBase64.length : undefined,
+        patientData: body.patientData || undefined,
+      };
+
+      const auditId = await createAuditLog({
+        userId,
+        apiKeyId,
+        endpoint: "/screening/mammography",
+        method: "POST",
+        statusCode: 200,
+        requestBody: requestMeta,
+        responseBody: {
+          riskLevel: result.riskLevel,
+          riskScore: result.riskScore,
+          adjustedConfidence,
+          quality: result.quality,
+          model: result.analysisMethod,
+        },
+      });
+
+      return c.json({
+        ...responseBody,
+        auditId,
       });
     } catch (err) {
       return c.json({ error: "Analysis failed" }, 500);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, FileText, Activity, AlertCircle, CheckCircle, ArrowRight, Info } from "lucide-react";
+import { Plus, FileText, Activity, AlertCircle, CheckCircle, ArrowRight } from "lucide-react";
 import Link from "next/link";
 
 type RecentScan = {
@@ -15,7 +15,6 @@ type RecentScan = {
 function DashboardPage() {
   const [recentScans, setRecentScans] = useState<RecentScan[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isDemoMode, setIsDemoMode] = useState(false);
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -27,7 +26,6 @@ function DashboardPage() {
         });
         if (res.ok) {
           const data = await res.json();
-          // Transform history into recent scans
           const scans: RecentScan[] = [];
           data.history?.predictions?.forEach((p: any) => {
             scans.push({
@@ -48,10 +46,9 @@ function DashboardPage() {
             });
           });
           setRecentScans(scans.slice(0, 5));
-          setIsDemoMode(scans.length === 0);
         }
       } catch (err) {
-        setIsDemoMode(true);
+        // History not available
       }
 
       setIsLoading(false);
@@ -59,25 +56,6 @@ function DashboardPage() {
 
     fetchHistory();
   }, []);
-
-  const demoScans: RecentScan[] = [
-    {
-      id: "demo-1",
-      type: "Chest X-Ray",
-      date: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-      result: "Normal",
-      riskLevel: "low"
-    },
-    {
-      id: "demo-2",
-      type: "Mammogram",
-      date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-      result: "BI-RADS 1",
-      riskLevel: "low"
-    }
-  ];
-
-  const displayScans = recentScans.length > 0 ? recentScans : (isDemoMode ? demoScans : []);
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -107,18 +85,6 @@ function DashboardPage() {
         </div>
       </Link>
 
-      {isDemoMode && (
-        <div className="mb-8 bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
-          <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-blue-800">Demo Mode - Showing Sample Data</p>
-            <p className="text-sm text-blue-600 mt-1">
-              Complete a screening to see your actual results. Your screening history will appear here.
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <div className="bg-surface border border-border rounded-xl p-5">
@@ -127,7 +93,7 @@ function DashboardPage() {
               <CheckCircle className="w-5 h-5 text-green-600" />
             </div>
             <div>
-              <p className="text-2xl font-bold text-foreground">{displayScans.length}</p>
+              <p className="text-2xl font-bold text-foreground">{recentScans.length}</p>
               <p className="text-sm text-muted">Total Screenings</p>
             </div>
           </div>
@@ -140,7 +106,7 @@ function DashboardPage() {
             </div>
             <div>
               <p className="text-2xl font-bold text-foreground">
-                {displayScans.filter(s => s.riskLevel === "low").length}
+                {recentScans.filter(s => s.riskLevel === "low").length}
               </p>
               <p className="text-sm text-muted">Low Risk Results</p>
             </div>
@@ -173,13 +139,13 @@ function DashboardPage() {
           <div className="border border-border rounded-xl p-8 text-center">
             <p className="text-muted">Loading...</p>
           </div>
-        ) : displayScans.length > 0 ? (
+        ) : recentScans.length > 0 ? (
           <div className="border border-border rounded-xl overflow-hidden">
-            {displayScans.map((scan, i) => (
+            {recentScans.map((scan, i) => (
               <div
                 key={scan.id}
                 className={`flex items-center justify-between px-5 py-4 ${
-                  i !== displayScans.length - 1 ? "border-b border-border" : ""
+                  i !== recentScans.length - 1 ? "border-b border-border" : ""
                 }`}
               >
                 <div className="flex items-center gap-4">
@@ -211,29 +177,16 @@ function DashboardPage() {
             ))}
           </div>
         ) : (
-          <div className="border border-border rounded-xl p-8 text-center">
-            <FileText className="w-12 h-12 mx-auto text-muted mb-3" />
-            <p className="text-foreground font-medium">No screenings yet</p>
-            <p className="text-sm text-muted mt-1">
-              Start by getting your first AI-powered screening
-            </p>
-            <Link
-              href="/screening"
-              className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-action text-white text-sm font-medium rounded-lg hover:opacity-90"
-            >
+          <div className="border border-border rounded-xl p-12 text-center">
+            <FileText className="w-12 h-12 mx-auto text-muted mb-4" />
+            <p className="text-lg font-medium text-foreground">No screenings yet</p>
+            <p className="text-muted mt-1 mb-4">Start your first screening to see results here</p>
+            <Link href="/screening" className="inline-flex items-center gap-2 px-4 py-2 bg-action text-white rounded-lg hover:opacity-90">
               <Plus className="w-4 h-4" />
-              New Screening
+              Start Screening
             </Link>
           </div>
         )}
-      </div>
-
-      {/* Disclaimer */}
-      <div className="mt-8 p-4 bg-yellow-50 border border-yellow-200 rounded-xl">
-        <p className="text-sm text-yellow-800">
-          <strong>Important:</strong> Mira provides AI-powered screening assistance, not medical diagnoses. 
-          Always consult with a qualified healthcare professional for proper medical advice.
-        </p>
       </div>
     </div>
   );

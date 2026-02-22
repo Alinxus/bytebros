@@ -1,4 +1,4 @@
-# Cavista - AI-Powered Cancer Early Detection Platform
+# Mira - AI-Powered Cancer Early Detection Platform
 
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Hackathon%20Ready-success?style=for-the-badge" alt="Status">
@@ -10,7 +10,7 @@
 
 **"From Detection to Prevention"** - Catch cancer before it starts.
 
-Cavista uses AI to analyze medical images and patient data to provide early cancer risk assessments, empowering patients and healthcare providers with actionable insights.
+Mira uses AI to analyze medical images and patient data to provide early cancer risk assessments, empowering patients and healthcare providers with actionable insights.
 
 ---
 
