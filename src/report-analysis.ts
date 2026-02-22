@@ -214,11 +214,11 @@ report.post(
     const userId = await authenticate(apiKey);
     const { reportType } = c.req.valid("form");
 
-    const contentType = c.req.header("content-type") || "";
-    
     try {
-      const formData = await c.req.parseForm();
-      const file = formData.get("file") as File | null;
+      const contentType = c.req.header("content-type") || "";
+      
+      const body = await c.req.parseBody();
+      const file = body.file as File | null;
       
       if (!file) {
         return c.json({ success: false, error: "No file provided" }, 400);

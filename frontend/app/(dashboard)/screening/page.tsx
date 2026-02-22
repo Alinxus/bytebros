@@ -131,8 +131,19 @@ function NewScreeningPage() {
     let totalWeight = 0;
 
     for (const model of analysisResults) {
-      const score = riskLevelToScore(model.riskLevel);
-      const weight = Math.max(0.4, Math.min(1, model.confidence / 100));
+      // Use ML model's risk assessment directly (now calibrated)
+      const maxProb = Math.max(...model.findings.map(f => f.probability), 0);
+      
+      let score: number;
+      if (maxProb >= 65 || model.riskLevel === "high") {
+        score = 80; // High risk
+      } else if (maxProb >= 35 || model.riskLevel === "medium") {
+        score = 50; // Medium risk
+      } else {
+        score = 15; // Low risk - default to low
+      }
+      
+      const weight = Math.max(0.5, Math.min(1, model.confidence / 100));
       inputs.push({ label: model.name, score, weight });
       totalWeighted += score * weight;
       totalWeight += weight;
@@ -217,10 +228,16 @@ function NewScreeningPage() {
       clearInterval(progressInterval);
       setAnalysisProgress(95);
 
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        const text = await res.text();
+        throw new Error(text || "Invalid response from server. Please ensure the backend is running.");
+      }
 
       if (!res.ok) {
-        throw new Error(data.error || "Analysis failed");
+        throw new Error(data?.error || "Analysis failed");
       }
 
       const normalized = data.analysis ? data.analysis : data;

@@ -167,30 +167,42 @@ function ReportAnalysisPage() {
 
         setIsUploading(false);
 
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || "Analysis failed");
+        let data;
+        try {
+          data = await res.json();
+        } catch (parseErr) {
+          const text = await res.text();
+          throw new Error(text || "Invalid response from server. Please ensure the backend is running.");
         }
 
-        const data = await res.json();
-        setResult(data.analysis);
+        if (!res.ok) {
+          throw new Error(data?.error || "Analysis failed");
+        }
+
+        setResult(data.analysis || data);
       } else {
-        const res = await fetch("/api/screening/report/analyze", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": apiKey,
-          },
-          body: JSON.stringify(requestBody),
-        });
+      const res = await fetch("/api/screening/report/analyze", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+        },
+        body: JSON.stringify(requestBody),
+      });
 
-        const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        const text = await res.text();
+        throw new Error(text || "Invalid response from server. Please ensure the backend is running.");
+      }
 
-        if (!res.ok) {
-          throw new Error(data.error || "Analysis failed");
-        }
+      if (!res.ok) {
+        throw new Error(data?.error || `Server error: ${res.status}`);
+      }
 
-        setResult(data.analysis);
+      setResult(data.analysis || data);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analysis failed. Please try again.");
