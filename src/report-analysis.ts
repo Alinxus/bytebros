@@ -81,10 +81,12 @@ IMPORTANT:
 - Always recommend consulting a healthcare professional
 - Be encouraging and supportive in tone
 - If you see concerning results, advise follow-up without causing alarm
+- Explain each finding in plain English and relate it to the model output evidence
 
 Provide your analysis in this JSON format:
 {
   "summary": "A 2-3 sentence plain-English summary of what this report shows",
+  "overallAssessment": "One sentence overall assessment in plain English",
   "findings": [
     {
       "term": "Medical term found",
@@ -92,10 +94,20 @@ Provide your analysis in this JSON format:
       "severity": "normal|watch|follow-up"
     }
   ],
+  "findingExplanations": [
+    {
+      "term": "Finding name",
+      "plainMeaning": "What this means in simple language",
+      "whyFlagged": "Why the model flagged it (based on the provided output text)",
+      "whatToWatch": "What changes or symptoms to watch for",
+      "suggestedFollowUp": "Suggested next step (non-diagnostic)"
+    }
+  ],
   "recommendations": [
     "Specific actionable recommendation 1",
     "Specific actionable recommendation 2"
   ],
+  "confidenceNotes": "Short note about uncertainty or quality issues",
   "riskLevel": "low|medium|high|unknown",
   "followUp": [
     "What to do next step 1",
@@ -114,10 +126,11 @@ Remember: Use simple language, be encouraging, and always recommend professional
 
       const response = await openai.chat.completions.create({
         model: "gpt-4o",
+        response_format: { type: "json_object" },
         messages: [
           {
             role: "system",
-            content: "You are a helpful medical AI assistant that explains medical reports in simple, patient-friendly language. Always recommend consulting healthcare professionals."
+            content: "You are a helpful medical AI assistant that explains medical reports in simple, patient-friendly language. Always recommend consulting healthcare professionals. You must respond in JSON."
           },
           {
             role: "user",
