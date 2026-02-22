@@ -138,14 +138,14 @@ def analyze_with_model(img_tensor, model_name='densenet121'):
         results.append({
             'pathology': pathology,
             'probability': round(prob * 100, 2),
-            'risk_level': 'high' if prob > 0.7 else 'medium' if prob > 0.4 else 'low'
+            'risk_level': 'high' if prob > 0.85 else 'medium' if prob > 0.65 else 'low'
         })
     
     # Sort by probability
     results.sort(key=lambda x: x['probability'], reverse=True)
     
-    # Get top findings - show results above 10% probability
-    findings = [r for r in results if r['probability'] > 10]
+    # Get top findings - show results above 25% probability to reduce false positives
+    findings = [r for r in results if r['probability'] > 25]
 
     # Weighted risk scoring (more clinically plausible than raw counts)
     pathology_weights = {
@@ -174,17 +174,24 @@ def analyze_with_model(img_tensor, model_name='densenet121'):
         w = pathology_weights.get(r["pathology"], 0.6)
         weighted += (r["probability"] / 100.0) * w
 
-    risk_score = max(0.0, min(1.0, weighted / 2.5))
+    risk_score = max(0.0, min(1.0, weighted / 3.2))
 
     # Calibrated confidence (heuristic sigmoid scaling)
     raw_confidence = max([r['probability'] for r in results]) / 100
     calibrated_confidence = 1 / (1 + np.exp(-6 * (raw_confidence - 0.5)))
     calibrated_confidence = float(max(0.05, min(0.95, calibrated_confidence)))
 
-    if risk_score >= 0.6:
+    max_prob = max([r['probability'] for r in results]) / 100
+    critical_pathologies = {"Mass", "Nodule", "Lung Lesion", "Pneumothorax"}
+    critical_hits = [r for r in results if r["pathology"] in critical_pathologies and r["probability"] >= 70]
+
+    if max_prob < 0.6 and len(critical_hits) == 0:
+        overall_risk = 'low'
+        recommendation = 'No significant abnormalities detected'
+    elif risk_score >= 0.75 and len(critical_hits) >= 1:
         overall_risk = 'high'
         recommendation = 'Immediate medical consultation recommended'
-    elif risk_score >= 0.35:
+    elif risk_score >= 0.55:
         overall_risk = 'medium'
         recommendation = 'Follow-up with specialist recommended'
     else:
