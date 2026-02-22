@@ -134,6 +134,17 @@ function LongitudinalPage() {
       scansFromHistory.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       setScans(scansFromHistory);
       setLastUpdated(new Date().toLocaleString());
+      if (scansFromHistory.length === 0) {
+        try {
+          const raw = localStorage.getItem("cavista_scan_history");
+          if (raw) {
+            const local = JSON.parse(raw) as ScanEntry[];
+            setScans(local);
+          }
+        } catch {
+          // ignore
+        }
+      }
     } catch {
       setError("Unable to load history.");
     } finally {
