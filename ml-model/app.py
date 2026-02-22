@@ -311,12 +311,20 @@ def mammography_analyze():
             calibrated_confidence = 1 / (1 + np.exp(-6 * (raw_confidence - 0.5)))
             calibrated_confidence = float(max(0.05, min(0.95, calibrated_confidence)))
 
+            # Calculate riskScore based on prediction, not just confidence
+            # If malignant: higher probability of malignant = higher risk
+            # If benign: risk is low regardless of confidence
+            if prediction == 1:
+                risk_score = probability[1] * 100  # Use malignant probability
+            else:
+                risk_score = probability[0] * 20   # Low risk for benign
+
             return jsonify({
                 'success': True,
                 'prediction': 'malignant' if prediction == 1 else 'benign',
                 'confidence': raw_confidence,
                 'calibratedConfidence': calibrated_confidence,
-                'riskScore': round(raw_confidence * 100, 1),
+                'riskScore': round(risk_score, 1),
                 'quality': quality,
                 'probabilities': {
                     'benign': float(probability[0]),
