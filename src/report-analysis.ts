@@ -15,6 +15,10 @@ const reportAnalysisSchema = z.object({
   reportType: z.enum(["blood", "imaging", "biopsy", "general"]).optional(),
 });
 
+const fileAnalysisSchema = z.object({
+  reportType: z.enum(["blood", "imaging", "biopsy", "general"]).optional(),
+});
+
 const authenticate = async (apiKey?: string | null) => {
   if (!apiKey) return null;
   const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
@@ -196,6 +200,261 @@ Remember: Use simple language, be encouraging, and always recommend professional
           recommendations: ["Schedule an appointment with your doctor", "Bring this report to your next visit"],
           riskLevel: "unknown"
         }
+      }, 500);
+    }
+  }
+);
+
+// File upload endpoint for PDF and image analysis
+report.post(
+  "/analyze/file",
+  zValidator("form", fileAnalysisSchema),
+  async (c) => {
+    const apiKey = c.req.header("x-api-key");
+    const userId = await authenticate(apiKey);
+    const { reportType } = c.req.valid("form");
+
+    const contentType = c.req.header("content-type") || "";
+    
+    try {
+      const formData = await c.req.parseForm();
+      const file = formData.get("file") as File | null;
+      
+      if (!file) {
+        return c.json({ success: false, error: "No file provided" }, 400);
+      }
+
+      const fileBuffer = await file.arrayBuffer();
+      const fileName = file.name.toLowerCase();
+      
+      let extractedText = "";
+      
+      // Handle different file types
+      if (fileName.endsWith(".pdf")) {
+        // For PDF, we'll try to extract text using pdf-parse or return a message
+        // Since we don't have pdf-parse installed, we'll use a simple approach
+        extractedText = `[PDF Document: ${file.name}]\n\nNote: Full PDF text extraction requires additional processing. Please copy and paste the text content from your PDF for analysis, or contact support for PDF processing.`;
+        
+        // If OpenAI API is available, we can try using GPT-4 with vision for embedded images
+        // For now, return a message asking for text
+        return c.json({
+          success: false,
+          error: "PDF processing requires text extraction. Please copy the text from your PDF and paste it into the text field, or convert your report to an image.",
+          requiresTextInput: true
+        }, 400);
+        
+      } else if (fileName.endsWith(".txt")) {
+        // Text files
+        const decoder = new TextDecoder("utf-8");
+        extractedText = decoder.decode(fileBuffer);
+        
+      } else if (file.type?.startsWith("image/")) {
+        // For images, use OpenAI Vision API
+        if (!openai) {
+          return c.json({ 
+            success: false, 
+            error: "Image analysis is currently unavailable. Please use the text input option." 
+          }, 503);
+        }
+        
+        // Convert to base64
+        const base64Image = Buffer.from(fileBuffer).toString("base64");
+        const mimeType = file.type || "image/jpeg";
+        
+        const reportTypeLabel = reportType || "medical";
+        
+        const visionPrompt = `You are a helpful medical AI assistant. Analyze this medical report image and provide easy-to-understand results for a patient.
+
+IMPORTANT: 
+- Use simple language that a non-medical person can understand
+- Do NOT make any medical diagnoses
+- Always recommend consulting a healthcare professional
+- Be encouraging and supportive in tone
+
+Provide your analysis in this JSON format:
+{
+  "summary": "A 2-3 sentence plain-English summary of what this report shows",
+  "findings": [
+    {
+      "term": "Medical term found",
+      "explanation": "Simple explanation of what this means in plain English",
+      "severity": "normal|watch|follow-up"
+    }
+  ],
+  "recommendations": ["Specific actionable recommendation"],
+  "riskLevel": "low|medium|high|unknown",
+  "followUp": ["What to do next"],
+  "questionsForDoctor": ["Question for your doctor"]
+}`;
+
+        const response = await openai.chat.completions.create({
+          model: "gpt-4o",
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content: "You are a helpful medical AI assistant that explains medical reports in simple, patient-friendly language. Always recommend consulting healthcare professionals."
+            },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: visionPrompt },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:${mimeType};base64,${base64Image}`
+                  }
+                }
+              ]
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 1500
+        });
+
+        const content = response.choices[0]?.message?.content || "";
+        
+        let analysis;
+        try {
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            analysis = JSON.parse(jsonMatch[0]);
+          } else {
+            throw new Error("No JSON found");
+          }
+        } catch {
+          analysis = {
+            summary: content.substring(0, 500),
+            findings: [],
+            recommendations: ["Please consult your healthcare provider for interpretation"],
+            riskLevel: "unknown",
+            followUp: ["Schedule a follow-up appointment"],
+            questionsForDoctor: []
+          };
+        }
+
+        if (userId) {
+          try {
+            await prisma.reportAnalysis.create({
+              data: {
+                userId,
+                reportType: reportType || "general",
+                summary: analysis.summary || "",
+                riskLevel: analysis.riskLevel || "unknown",
+                findings: analysis.findings || [],
+                recommendations: analysis.recommendations || [],
+                questions: analysis.questionsForDoctor || [],
+              },
+            });
+          } catch (e) {
+            console.log("[Report Analysis] Failed to save analysis", e);
+          }
+        }
+
+        return c.json({
+          success: true,
+          analysis,
+          disclaimer: "This is AI-generated analysis for informational purposes only. Always consult with a qualified healthcare professional for proper medical advice."
+        });
+      } else {
+        return c.json({ success: false, error: "Unsupported file type. Please upload a text file, PDF, or image." }, 400);
+      }
+
+      if (!extractedText || extractedText.length < 10) {
+        return c.json({ success: false, error: "Could not extract text from file. Please try again or use text input." }, 400);
+      }
+
+      // Process extracted text with the same logic as text input
+      const reportTypeLabel = reportType || "medical";
+      
+      const prompt = `You are a helpful medical AI assistant. Analyze the following ${reportTypeLabel} report and provide easy-to-understand results for a patient.
+
+IMPORTANT: 
+- Use simple language that a non-medical person can understand
+- Do NOT make any medical diagnoses
+- Always recommend consulting a healthcare professional
+- Be encouraging and supportive in tone
+
+Provide your analysis in this JSON format:
+{
+  "summary": "A 2-3 sentence plain-English summary",
+  "findings": [{"term": "term", "explanation": "explanation", "severity": "normal|watch|follow-up"}],
+  "recommendations": ["recommendation"],
+  "riskLevel": "low|medium|high|unknown",
+  "followUp": ["follow-up"],
+  "questionsForDoctor": ["question"]
+}
+
+REPORT TEXT:
+${extractedText}`;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: "You are a helpful medical AI assistant that explains medical reports in simple, patient-friendly language. Always recommend consulting healthcare professionals."
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 1500
+      });
+
+      const content = response.choices[0]?.message?.content || "";
+      
+      let analysis;
+      try {
+        const jsonMatch = content.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          analysis = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error("No JSON found");
+        }
+      } catch {
+        analysis = {
+          summary: content.substring(0, 500),
+          findings: [],
+          recommendations: ["Please consult your healthcare provider for interpretation"],
+          riskLevel: "unknown",
+          followUp: ["Schedule a follow-up appointment"],
+          questionsForDoctor: []
+        };
+      }
+
+      if (userId) {
+        try {
+          await prisma.reportAnalysis.create({
+            data: {
+              userId,
+              reportType: reportType || "general",
+              summary: analysis.summary || "",
+              riskLevel: analysis.riskLevel || "unknown",
+              findings: analysis.findings || [],
+              recommendations: analysis.recommendations || [],
+              questions: analysis.questionsForDoctor || [],
+            },
+          });
+        } catch (e) {
+          console.log("[Report Analysis] Failed to save analysis", e);
+        }
+      }
+
+      return c.json({
+        success: true,
+        analysis,
+        disclaimer: "This is AI-generated analysis for informational purposes only. Always consult with a qualified healthcare professional for proper medical advice."
+      });
+
+    } catch (error) {
+      console.error("[Report Analysis File] Error:", error);
+      return c.json({
+        success: false,
+        error: "Failed to analyze file. Please try again or use text input.",
       }, 500);
     }
   }

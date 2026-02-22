@@ -1,9 +1,9 @@
 
 /*
-|--------------------------------------------------------------
-| Features Data
-|--------------------------------------------------------------
-*/
+ |--------------------------------------------------------------
+ | Features Data
+ |--------------------------------------------------------------
+ */
 const FEATURES = [
   {
     title: "Know Your Risk",
@@ -42,10 +42,10 @@ const FEATURES = [
 
 
 /*
-|--------------------------------------------------------------
-| Features Component
-|--------------------------------------------------------------
-*/
+ |--------------------------------------------------------------
+ | Features Component
+ |--------------------------------------------------------------
+ */
 
 function Features() {
   return (
@@ -71,8 +71,8 @@ function Features() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {FEATURES.map((feature) => (
             <div key={feature.title} className="p-8 bg-surface border border-border rounded-xl hover:border-action/50 transition-colors">
-              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
-                <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                 </svg>
               </div>
@@ -88,7 +88,7 @@ function Features() {
                     key={detail}
                     className="text-sm text-muted flex items-center gap-2"
                   >
-                    <svg className="w-4 h-4 text-green-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <svg className="w-4 h-4 text-action flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
                     </svg>
                     {detail}

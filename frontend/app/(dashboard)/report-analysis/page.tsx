@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Upload, FileText, Brain, Loader2, Download, Share2, AlertCircle, CheckCircle, ClipboardList, Stethoscope, Activity, MessageCircle, ArrowRight } from "lucide-react";
+import { Upload, FileText, Brain, Loader2, Download, Share2, AlertCircle, CheckCircle, ClipboardList, Stethoscope, Activity, MessageCircle, ArrowRight, X, File, Image } from "lucide-react";
 
 type Finding = {
   term: string;
@@ -41,6 +41,8 @@ function ReportAnalysisPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState("");
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const buildEvidenceSnippets = (text: string, findings: Finding[]): EvidenceSnippet[] => {
@@ -89,17 +91,52 @@ function ReportAnalysisPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.type === "text/plain" || file.name.endsWith(".txt")) {
-      const text = await file.text();
-      setReportText(text);
-    } else {
-      setError("Please paste text content or upload a text file");
+    setUploadedFile(file);
+    setError("");
+
+    try {
+      if (file.type === "text/plain" || file.name.endsWith(".txt")) {
+        const text = await file.text();
+        setReportText(text);
+      } else if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+        setReportText(`[PDF Document: ${file.name}]\n\nPlease wait while we process your PDF...`);
+      } else if (file.type.startsWith("image/")) {
+        setReportText(`[Image: ${file.name}]\n\nImage upload detected. Processing for text extraction...`);
+      } else {
+        setError("Unsupported file type. Please upload a text file, PDF, or image.");
+        return;
+      }
+    } catch (err) {
+      setError("Failed to read file. Please try again.");
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file && fileInputRef.current) {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      fileInputRef.current.files = dt.files;
+      handleFileUpload({ target: { files: dt.files } } as any);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const removeFile = () => {
+    setUploadedFile(null);
+    setReportText("");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   };
 
   const handleAnalyze = async () => {
-    if (!reportText.trim() || reportText.length < 10) {
-      setError("Please enter your medical report text (at least 10 characters)");
+    if ((!reportText.trim() || reportText.length < 10) && !uploadedFile) {
+      setError("Please upload a file or enter your medical report text (at least 10 characters)");
       return;
     }
 
@@ -109,29 +146,57 @@ function ReportAnalysisPage() {
     const apiKey = localStorage.getItem("cavista_api_key") || "";
 
     try {
-      const res = await fetch("/api/screening/report/analyze", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-        },
-        body: JSON.stringify({
-          reportText: reportText,
-          reportType: reportType || "general",
-        }),
-      });
+      let requestBody: any = {
+        reportText: reportText,
+        reportType: reportType || "general",
+      };
 
-      const data = await res.json();
+      if (uploadedFile && (uploadedFile.type !== "text/plain" && !uploadedFile.name.endsWith(".txt"))) {
+        setIsUploading(true);
+        const formData = new FormData();
+        formData.append("file", uploadedFile);
+        formData.append("reportType", reportType || "general");
 
-      if (!res.ok) {
-        throw new Error(data.error || "Analysis failed");
+        const res = await fetch("/api/screening/report/analyze/file", {
+          method: "POST",
+          headers: {
+            "x-api-key": apiKey,
+          },
+          body: formData,
+        });
+
+        setIsUploading(false);
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Analysis failed");
+        }
+
+        const data = await res.json();
+        setResult(data.analysis);
+      } else {
+        const res = await fetch("/api/screening/report/analyze", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || "Analysis failed");
+        }
+
+        setResult(data.analysis);
       }
-
-      setResult(data.analysis);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analysis failed. Please try again.");
     } finally {
       setIsAnalyzing(false);
+      setIsUploading(false);
     }
   };
 
@@ -231,10 +296,60 @@ Generated by Mira AI
             </div>
           </div>
 
+          {/* File Upload */}
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-3">
+              Upload Report File
+            </label>
+            {!uploadedFile ? (
+              <div
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-border rounded-xl p-8 text-center cursor-pointer hover:border-action/50 hover:bg-surface transition-all"
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".txt,.pdf,image/*"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+                <Upload className="w-10 h-10 mx-auto mb-4 text-muted" />
+                <p className="text-sm text-muted mb-2">
+                  Drag and drop your report here, or click to browse
+                </p>
+                <p className="text-xs text-muted">
+                  Supports: PDF, Text (.txt), Images (JPG, PNG)
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-center gap-4 p-4 bg-surface border border-border rounded-xl">
+                {uploadedFile.type.startsWith("image/") ? (
+                  <Image className="w-10 h-10 text-muted" />
+                ) : uploadedFile.name.endsWith(".pdf") ? (
+                  <FileText className="w-10 h-10 text-red-500" />
+                ) : (
+                  <File className="w-10 h-10 text-blue-500" />
+                )}
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-foreground">{uploadedFile.name}</p>
+                  <p className="text-xs text-muted">{(uploadedFile.size / 1024).toFixed(1)} KB</p>
+                </div>
+                <button
+                  onClick={removeFile}
+                  className="p-2 hover:bg-background rounded-lg"
+                >
+                  <X className="w-5 h-5 text-muted" />
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Text Input */}
           <div>
             <label className="block text-sm font-medium text-foreground mb-3">
-              Paste your medical report
+              Or paste your medical report
             </label>
             <textarea
               value={reportText}
@@ -247,7 +362,7 @@ WBC: 7.5 x10^9/L
 RBC: 4.8 x10^12/L
 Hemoglobin: 14.2 g/dL
 Platelets: 250 x10^9/L"
-              className="w-full h-64 border border-border rounded-xl p-4 text-sm bg-background text-foreground placeholder:text-muted resize-none focus:outline-none focus:border-action"
+              className="w-full h-48 border border-border rounded-xl p-4 text-sm bg-background text-foreground placeholder:text-muted resize-none focus:outline-none focus:border-action"
             />
           </div>
 
@@ -259,11 +374,15 @@ Platelets: 250 x10^9/L"
 
           <button
             onClick={handleAnalyze}
-            disabled={!reportText.trim() || reportText.length < 10}
+            disabled={(!reportText.trim() || reportText.length < 10) && !uploadedFile || isAnalyzing || isUploading}
             className="w-full py-4 bg-action text-white font-semibold rounded-xl hover:opacity-90 transition-opacity flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            <Brain className="w-5 h-5" />
-            Analyze with AI
+            {(isAnalyzing || isUploading) ? (
+              <Loader2 className="w-5 h-5 animate-spin" />
+            ) : (
+              <Brain className="w-5 h-5" />
+            )}
+            {isUploading ? "Processing file..." : "Analyze with AI"}
           </button>
         </div>
       )}
