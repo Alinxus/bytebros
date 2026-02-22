@@ -62,11 +62,15 @@ def process_image(image_data, target_size=224):
         # Resize
         img = img.resize((target_size, target_size), Image.Resampling.LANCZOS)
         
-        # Convert to numpy array and normalize properly for xrv
+        # Convert to numpy array (0-255)
         import numpy as np
-        img_np = np.array(img).astype(np.float32) / 255.0
+        img_np = np.array(img).astype(np.float32)
         
-        # Apply xrv normalization
+        # Scale to xrv expected range [-1024, 1024] (Hounsfield Units)
+        # This simulates a chest X-ray in proper medical imaging range
+        img_np = (img_np / 255.0) * 2048 - 1024
+        
+        # Apply xrv normalization - this rescales to [0,1] properly
         img_np = xrv.utils.normalize(img_np, 255)
         
         # Convert to 3-channel by repeating (xrv models expect 3-channel)
