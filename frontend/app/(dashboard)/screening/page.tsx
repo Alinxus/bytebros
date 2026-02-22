@@ -92,6 +92,17 @@ function NewScreeningPage() {
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const appendLocalHistory = (entry: { id: string; type: string; date: string; result: string; riskLevel: string }) => {
+    try {
+      const raw = localStorage.getItem("cavista_scan_history");
+      const existing = raw ? JSON.parse(raw) : [];
+      const next = [entry, ...existing].slice(0, 50);
+      localStorage.setItem("cavista_scan_history", JSON.stringify(next));
+    } catch {
+      // ignore storage errors
+    }
+  };
+
   const riskLevelToScore = (riskLevel: string) => {
     if (riskLevel === "high") return 80;
     if (riskLevel === "medium") return 50;
@@ -375,6 +386,13 @@ function NewScreeningPage() {
         aiModelsUsed: analysisResults.map(r => r.name),
         totalFindings,
         quality: quality ? { quality: quality.quality, issues: quality.issues } : undefined,
+      });
+      appendLocalHistory({
+        id: data.auditId || Math.random().toString(36).slice(2),
+        type: scanType,
+        date: new Date().toISOString(),
+        result: overallRisk === "High" ? "Abnormal" : "Normal",
+        riskLevel: overallRisk === "High" ? "high" : overallRisk === "Medium" ? "medium" : "low",
       });
       const localConsensus = buildConsensus(analysisResults);
       setConsensus(localConsensus);

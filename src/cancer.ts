@@ -1306,6 +1306,8 @@ cancer.get("/history", async (c) => {
         id: p.id,
         type: p.prediction,
         result: p.prediction,
+        riskLevel: p.riskLevel,
+        riskScore: p.riskScore,
         date: p.createdAt,
       })),
       xrayAnalyses: analyses.map(a => ({

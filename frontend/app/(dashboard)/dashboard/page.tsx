@@ -46,9 +46,21 @@ function DashboardPage() {
             });
           });
           setRecentScans(scans.slice(0, 5));
+          setIsLoading(false);
+          return;
         }
       } catch (err) {
         // History not available
+      }
+
+      try {
+        const raw = localStorage.getItem("cavista_scan_history");
+        if (raw) {
+          const local = JSON.parse(raw) as RecentScan[];
+          setRecentScans(local.slice(0, 5));
+        }
+      } catch {
+        // ignore
       }
 
       setIsLoading(false);

@@ -51,9 +51,21 @@ function ResultsPage() {
           
           scans.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
           setResults(scans);
+          setIsLoading(false);
+          return;
         }
       } catch {
         // History not available
+      }
+
+      try {
+        const raw = localStorage.getItem("cavista_scan_history");
+        if (raw) {
+          const local = JSON.parse(raw) as ScanResult[];
+          setResults(local);
+        }
+      } catch {
+        // ignore
       }
 
       setIsLoading(false);
