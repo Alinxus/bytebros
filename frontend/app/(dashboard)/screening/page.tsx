@@ -20,6 +20,7 @@ type AnalysisResult = {
   findings: Finding[];
   recommendation: string;
   riskLevel: "low" | "medium" | "high";
+  riskScore?: number;
   accuracy?: string;
   processingTime?: string;
 };
@@ -131,19 +132,11 @@ function NewScreeningPage() {
     let totalWeight = 0;
 
     for (const model of analysisResults) {
-      // Use ML model's risk assessment directly
-      const maxProb = Math.max(...model.findings.map(f => f.probability), 0);
+      // Use ML model's actual risk score directly
+      const score = model.riskScore || 
+        (model.riskLevel === "high" ? 75 : model.riskLevel === "medium" ? 45 : 20);
       
-      let score: number;
-      if (model.riskLevel === "high" || maxProb >= 55) {
-        score = 75;
-      } else if (model.riskLevel === "medium" || maxProb >= 40) {
-        score = 45;
-      } else {
-        score = 20;
-      }
-      
-      const weight = Math.max(0.5, model.confidence);
+      const weight = Math.max(0.6, model.confidence || 0.8);
       inputs.push({ label: model.name, score, weight });
       totalWeighted += score * weight;
       totalWeight += weight;
@@ -284,6 +277,7 @@ function NewScreeningPage() {
           findings: allFindings.filter(f => f.probability > 15),
           recommendation: normalized.recommendations?.[0] || "Continue regular screenings",
           riskLevel: normalized.riskLevel || normalized.overall_risk || (normalized.hasAbnormality ? "medium" : "low"),
+          riskScore: Math.round(normalized.risk_score || normalized.riskScore || 0),
           accuracy: "94.5%",
           processingTime: "1.2s",
         });
