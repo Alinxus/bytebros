@@ -69,16 +69,13 @@ def process_image(image_data, target_size=224):
         # Scale to [0, 1] range
         img_np = img_np / 255.0
         
-        # Convert to 3-channel by repeating (xrv models expect 3-channel)
-        if len(img_np.shape) == 2:
-            img_np = np.stack([img_np] * 3, axis=0)
-        else:
-            img_np = img_np.transpose(2, 0, 1)
+        # Keep as 1 channel (xrv models expect 1 channel)
+        img_np = img_np.reshape(1, target_size, target_size)
         
-        # Apply ImageNet normalization (what the pretrained model expects)
-        mean = np.array([0.485, 0.456, 0.406]).reshape(3, 1, 1)
-        std = np.array([0.229, 0.224, 0.225]).reshape(3, 1, 1)
-        img_np = (img_np - mean) / std
+        # Apply xrv normalization - use proper bound
+        # xrv expects values in [-1024, 1024] for real X-rays, but we'll use [0,1]
+        # with the proper xrv normalization
+        img_np = xrv.utils.normalize(img_np, maxval=1.0)
         
         # Convert to tensor
         img_tensor = torch.from_numpy(img_np).float()
